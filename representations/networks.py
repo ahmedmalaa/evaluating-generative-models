@@ -47,8 +47,8 @@ torch.manual_seed(1)
 
 # Global variables
 
-ACTIVATION_DICT = {"ReLU": torch.nn.ReLU(), 
-				   "Hardtanh": torch.nn.Hardtanh(),
+ACTIVATION_DICT = {"ReLU": torch.nn.ReLU(),
+                   "Hardtanh": torch.nn.Hardtanh(),
                    "ReLU6": torch.nn.ReLU6(), 
                    "Sigmoid": torch.nn.Sigmoid(),
                    "Tanh": torch.nn.Tanh(), 
