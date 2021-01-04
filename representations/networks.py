@@ -45,13 +45,20 @@ import time
 
 torch.manual_seed(1) 
 
+# Global variables
 
-ACTIVATION_DICT = {"ReLU": torch.nn.ReLU(), "Hardtanh": torch.nn.Hardtanh(),
-                   "ReLU6": torch.nn.ReLU6(), "Sigmoid": torch.nn.Sigmoid(),
-                   "Tanh": torch.nn.Tanh(), "ELU": torch.nn.ELU(),
-                   "CELU": torch.nn.CELU(), "SELU": torch.nn.SELU(), 
-                   "GLU": torch.nn.GLU(), "LeakyReLU": torch.nn.LeakyReLU(),
-                   "LogSigmoid": torch.nn.LogSigmoid(), "Softplus": torch.nn.Softplus()}
+ACTIVATION_DICT = {"ReLU": torch.nn.ReLU(), 
+				   "Hardtanh": torch.nn.Hardtanh(),
+                   "ReLU6": torch.nn.ReLU6(), 
+                   "Sigmoid": torch.nn.Sigmoid(),
+                   "Tanh": torch.nn.Tanh(), 
+                   "ELU": torch.nn.ELU(),
+                   "CELU": torch.nn.CELU(), 
+                   "SELU": torch.nn.SELU(), 
+                   "GLU": torch.nn.GLU(), 
+                   "LeakyReLU": torch.nn.LeakyReLU(),
+                   "LogSigmoid": torch.nn.LogSigmoid(), 
+                   "Softplus": torch.nn.Softplus()}
 
 
 def build_network(network_name, params):
@@ -65,14 +72,39 @@ def build_network(network_name, params):
 
 def feedforward_network(params):
 
+	"""Architecture for a Feedforward Neural Network
+	
+	Args:
+	
+		::params::
+	
+		::params["input_dim"]::
+		::params[""rep_dim""]::
+		::params["num_hidden"]::
+		::params["activation"]::
+		::params["num_layers"]::
+		::params["dropout_prob"]::
+		::params["dropout_active"]:: 
+		::params["LossFn"]::
+	
+	Returns:
+
+		::_architecture::
+
+	"""
+
     modules          = []
 
     if params["dropout_active"]: 
 
         modules.append(torch.nn.Dropout(p=params["dropout_prob"]))
 
+    # Input layer    
+
     modules.append(torch.nn.Linear(params["input_dim"], params["num_hidden"]))
     modules.append(ACTIVATION_DICT[params["activation"]])
+
+    # Intermediate layers
 
     for u in range(params["num_layers"] - 1):
 
@@ -82,6 +114,9 @@ def feedforward_network(params):
 
         modules.append(torch.nn.Linear(params["num_hidden"], params["num_hidden"]))
         modules.append(ACTIVATION_DICT[params["activation"]])
+
+    
+    # Output layer    
 
     modules.append(torch.nn.Linear(params["num_hidden"], params["rep_dim"]))
 
