@@ -72,26 +72,26 @@ def build_network(network_name, params):
 
 def feedforward_network(params):
 
-	"""Architecture for a Feedforward Neural Network
+    """Architecture for a Feedforward Neural Network
 	
-	Args:
+    Args:
 	
-		::params::
+        ::params::
 	
-		::params["input_dim"]::
-		::params[""rep_dim""]::
-		::params["num_hidden"]::
-		::params["activation"]::
-		::params["num_layers"]::
-		::params["dropout_prob"]::
-		::params["dropout_active"]:: 
-		::params["LossFn"]::
+        ::params["input_dim"]::
+        ::params[""rep_dim""]::
+        ::params["num_hidden"]::
+        ::params["activation"]::
+        ::params["num_layers"]::
+        ::params["dropout_prob"]::
+        ::params["dropout_active"]:: 
+        ::params["LossFn"]::
 	
-	Returns:
+    Returns:
 
-		::_architecture::
+        ::_architecture::
 
-	"""
+    """
 
     modules          = []
 
