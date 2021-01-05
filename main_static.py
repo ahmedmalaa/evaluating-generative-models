@@ -20,9 +20,9 @@ import numpy as np
 
 #%% Import functions
 from adsgan import adsgan
-from metrics.feature_distribution import feature_distribution
+from adsgan.metrics.feature_distribution import feature_distribution
 from metrics.compute_wd import compute_wd
-from metrics.compute_identifiability import compute_identifiability
+from adsgan.metrics.compute_identifiability import compute_identifiability
 
 
 #%% Data loading
