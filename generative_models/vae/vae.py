@@ -25,7 +25,7 @@ def vae(orig_data, params):
                     mb_size: mini-batch size
                     z_dim: random state dimension
                     h_dim: hidden state dimension
-                    lamda: identifiability parameter
+                    lambda: identifiability parameter
                     iterations: training iterations
                     
     Returns:
@@ -89,7 +89,7 @@ def vae(orig_data, params):
                             
     # X_recon from uniform distribution
     def X_recon_Z(m, n):
-        return np.random.randn(size = [m, n])
+        return np.random.randn(m, n)
                             
     # X_recon from the real data
     def X_recon_X(m, n):
