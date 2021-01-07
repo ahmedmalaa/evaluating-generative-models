@@ -1,234 +1,203 @@
-# -*- coding: utf-8 -*-
 """
-Created on Tue Jan  5 13:46:15 2021
+Reference: Jinsung Yoon, Lydia N. Drumright, Mihaela van der Schaar, 
+"Anonymization through Data Synthesis using Generative Adversarial Networks (ADS-GAN):
+A harmonizing advancement for AI in medicine," 
+IEEE Journal of Biomedical and Health Informatics (JBHI), 2019.
+Paper link: https://ieeexplore.ieee.org/document/9034117
+Last updated Date: December 22th 2020
+Code author: Jinsung Yoon (jsyoon0823@gmail.com)
 
-@author: boris
+Minor modifications made by Boris van Breugel (bv292@cam.ac.uk)
+-----------------------------
+adsgan.py
+- Generate synthetic data for GAN framework
+(1) Use original data to generate synthetic data
 """
 
-import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-
-import numpy as np
+#%% Import necessary packages
 import tensorflow as tf
-import matplotlib.pyplot as plt
-import random
-import datetime
-import os
+import numpy as np
+
+from tqdm import tqdm
 
 
-def MLP_encoder(x, keep_prob):
-    with tf.variable_scope('MLP_encoder'):
-        xavier_init = tf.contrib.layers.xavier_initializer()
-        
-        # First hidden layer
-        w1 = tf.get_variable('w1', [x.get_shape()[1], n_hidden], initializer=xavier_init)
-        b1 = tf.get_variable('b1', [n_hidden], initializer=xavier_init)
-        
-        h1 = tf.nn.relu(tf.matmul(x,w1)+b1)
-        h1 = tf.nn.dropout(h1, keep_prob)
-        
-        # Second hidden layer
-        w2 = tf.get_variable('w2', [h1.get_shape()[1], n_hidden], initializer=xavier_init)      
-        b2 = tf.get_variable('b2', [n_hidden], initializer=xavier_init)
-        
-        h2 = tf.nn.relu(tf.matmul(h1,w2)+b2)
-        h2 = tf.nn.dropout(h2, keep_prob)
-        
-        # Output layer
-        w_mean = tf.get_variable('w_mean', [h2.get_shape()[1], n_latent], initializer=xavier_init)      
-        b_mean = tf.get_variable('b_mean', [n_latent], initializer=xavier_init)      
-        
-        w_std = tf.get_variable('w_std', [h2.get_shape()[1], n_latent], initializer=xavier_init)      
-        b_std = tf.get_variable('b_std', [n_latent], initializer=xavier_init)    
-        
-        mean = tf.matmul(h2, w_mean)+b_mean
-        std  = tf.nn.relu(tf.matmul(h2, w_std)+b_std)
-        
-        return mean, std
-
-def MLP_decoder(z, keep_prob):
-    with tf.variable_scope('MLP_decoder'):
-        xavier_init = tf.contrib.layers.xavier_initializer()
-
-        # First hidden layer
-        w1 = tf.get_variable('w1', [z.get_shape()[1], n_hidden], initializer=xavier_init)
-        b1 = tf.get_variable('b1', [n_hidden], initializer=xavier_init)
-
-        h1 = tf.nn.relu(tf.matmul(z,w1)+b1)
-        h1 = tf.nn.dropout(h1, keep_prob)
-
-        # Second hidden layer
-        w2 = tf.get_variable('w2', [h1.get_shape()[1], n_hidden], initializer=xavier_init)      
-        b2 = tf.get_variable('b2', [n_hidden], initializer=xavier_init)
-
-        h2 = tf.nn.relu(tf.matmul(h1,w2)+b2)
-        h2 = tf.nn.dropout(h2, keep_prob)
-
-        # Output layer
-        wo = tf.get_variable('wo', [h2.get_shape()[1], data_size], initializer=xavier_init)      
-        bo = tf.get_variable('bo', [data_size], initializer=xavier_init)      
-
-        output = tf.sigmoid(tf.matmul(h2, wo)+bo)
-
-        return output
-
-
-def VAE(x, keep_prob_encoder, keep_prob_decoder):
-    # Encoder
-    mean, std = MLP_encoder(x, keep_prob_encoder)
+def vae(orig_data, params):
+    """Generate synthetic data for VAE framework.
     
-    # Sampling z
-    z = mean + std * tf.random_normal(tf.shape(mean), 0, 1, dtype=tf.float32)
+    Args:
+            orig_data: original data
+            params: Network parameters
+                    mb_size: mini-batch size
+                    z_dim: random state dimension
+                    h_dim: hidden state dimension
+                    lamda: identifiability parameter
+                    iterations: training iterations
+                    
+    Returns:
+            synth_data: synthetically generated data
+    """
+            
+    # Reset the tensorflow graph
+    tf.reset_default_graph()
+    
+    ## Parameters                
+    # Feature no
+    x_dim = len(orig_data.columns)                
+    # Sample no
+    no = len(orig_data)                
+    
+    # Batch size                
+    mb_size = params['mb_size']
+    # Latent representation dimension
+    z_dim = params['z_dim']
+    # Hidden unit dimensions
+    h_dim = params['h_dim']                
+    # Identifiability parameter
+    
+    # Training iterations
+    iterations = params['iterations']
+    # VAE type
+    lr = 1e-4                
+
+    #%% Data Preprocessing
+    orig_data = np.asarray(orig_data)
+
+    def data_normalization(orig_data, epsilon = 1e-8):
+                        
+        min_val = np.min(orig_data, axis=0)
+        
+        normalized_data = orig_data - min_val
+        
+        max_val = np.max(normalized_data, axis=0)
+        normalized_data = normalized_data / (max_val + epsilon)
+        
+        normalization_params = {"min_val": min_val, "max_val": max_val}
+        
+        return normalized_data, normalization_params
+
+    def data_renormalization(normalized_data, normalization_params, epsilon = 1e-8):
+        
+        renormalized_data = normalized_data * (normalization_params['max_val'] + epsilon)
+        renormalized_data = renormalized_data + normalization_params['min_val']
+        
+        return renormalized_data
+    
+    orig_data, normalization_params = data_normalization(orig_data)
+            
+    #%% Necessary Functions
+
+    # Xavier Initialization Definition
+    def xavier_init(size):
+        in_dim = size[0]
+        xavier_stddev = 1. / tf.sqrt(in_dim / 2.)
+        return tf.random_normal(shape = size, stddev = xavier_stddev)                
+                            
+    # Sample from uniform distribution
+    def sample_Z(m, n):
+        return np.random.randn(size = [m, n])
+                            
+    # Sample from the real data
+    def sample_X(m, n):
+        return np.random.permutation(m)[:n]        
+             
+    #%% Placeholder
+    # Feature
+    X = tf.placeholder(tf.float32, shape = [None, x_dim])         
+    sample = tf.placeholder(tf.float32, shape = [None, x_dim])         
+    # Random Variable                
+    Z = tf.placeholder(tf.float32, shape = [None, z_dim])
+    MU = tf.placeholder(tf.float32, shape = [None, z_dim])
+    LOGVAR = tf.placeholder(tf.float32, shape = [None, z_dim])
+    
+    
+    #%% Encoder
+    E_W1 = tf.Variable(xavier_init([x_dim, h_dim]))
+    E_b1 = tf.Variable(tf.zeros(shape=[h_dim]))
+    
+    E_W2e = tf.Variable(xavier_init([h_dim, h_dim]))
+    E_b2e = tf.Variable(tf.zeros(shape=[h_dim]))
+    
+    
+    E_W_sigma = tf.Variable(xavier_init([h_dim,z_dim]))
+    E_b_sigma = tf.Variable(tf.zeros(shape=[z_dim]))
+    
+    E_W_mu = tf.Variable(xavier_init([h_dim,z_dim]))
+    E_b_mu = tf.Variable(tf.zeros(shape=[z_dim]))
+    
     
     # Decoder
-    y = MLP_decoder(z, keep_prob_decoder)
     
-    # loss
-    cross_entropy = - tf.reduce_sum(x * tf.log(1e-8 + y) + (1 - x) * tf.log(1e-8 + 1 - y), 1)
-    KL_divergence = 0.5 * tf.reduce_sum(tf.square(mean) + tf.square(std) - tf.log(1e-8 + tf.square(std)) - 1, 1)
     
-    loss = tf.reduce_mean(cross_entropy) + tf.reduce_mean(KL_divergence)
+    D_W3 = tf.Variable(xavier_init([z_dim,h_dim]))
+    D_b3 = tf.Variable(tf.zeros(shape=[h_dim]))
+    
+    D_W2d = tf.Variable(xavier_init([h_dim, h_dim]))
+    D_b2d = tf.Variable(tf.zeros(shape=[h_dim]))
+    
+    
+    D_W4 = tf.Variable(xavier_init([h_dim, x_dim]))
+    D_b4 = tf.Variable(tf.zeros(shape=[x_dim]))
+        
+    theta = [E_W1, E_W_sigma, E_W_mu, D_W3, D_W4, E_b1, 
+               E_b_mu, E_b_sigma, D_b3, D_b4,
+               E_W2e, E_b2e, D_W2d, D_b2d]
+    
+    #%% Generator and discriminator functions
+    def encoder(x):
+        E_h1 = tf.nn.tanh(tf.matmul(x, E_W1) + E_b1)
+        E_h2 = tf.nn.tanh(tf.matmul(E_h1, E_W2e) + E_b2e)
+        E_hmu = tf.nn.tanh(tf.matmul(E_h2, E_W_mu) + E_b_mu)
+        E_hsigma = tf.matmul(E_h1, E_W_sigma) + E_b_sigma
+        return E_hmu, E_hsigma
+    
+    def decoder(z):
+        D_h3 = tf.nn.tanh(tf.matmul(z, D_W3) + D_b3)
+        D_h4 = tf.nn.tanh(tf.matmul(D_h3, D_W2d) + D_b2d)
+        x_recon = tf.nn.sigmoid(tf.matmul(D_h4, D_W4) + D_b4)
+        return x_recon
+            
+        
+        
+    #%% Structure
+    MU, LOGVAR = encoder(X)
+    Z = MU + tf.exp(LOGVAR/2) * tf.random_normal(tf.shape(MU), 0, 1, dtype=tf.float32)
+    
+    sample = decoder(Z)
+    
+    
+    
+    
+    loss1 = tf.reduce_mean(tf.square(sample-X))
+    loss2 = 0.5 * tf.reduce_mean(tf.square(MU) + tf.exp(LOGVAR) - LOGVAR - 1, 1)
+    
+    loss = loss1 + loss2
+    # Solver
+    
+    solver = (tf.train.AdamOptimizer(learning_rate = lr, beta1 = 0.5).minimize(loss, var_list = theta))
+                                            
+    #%% Iterations
+    sess = tf.Session()
+    sess.run(tf.global_variables_initializer())
+                            
+    # Iterations
+    for it in tqdm(range(iterations)):
+            # Discriminator training
+                      
+            X_idx = sample_X(no,mb_size)                                
+            X_mb = orig_data[X_idx,:]        
+                                                                            
+            _, E_loss1_curr, E_loss2_curr = sess.run([solver, loss1, loss2], feed_dict = {X: X_mb})
+            
+    #%% Output Generation
+    synth_data = sess.run([sample], feed_dict = {X: orig_data})
+    synth_data = synth_data[0]
+            
+    # Renormalization
+    synth_data = data_renormalization(synth_data, normalization_params)
+    
+    # Binary features
+    for i in range(x_dim):
+            if len(np.unique(orig_data[:, i])) == 2:
+                    synth_data[:, i] = np.round(synth_data[:, i])
      
-    return loss, mean, std, z, y    
-
-
-
-
-
-algorithm = 'VAE_MNIST'
-
-
-img_size   = 28
-data_size  = img_size**2
-
-num_label  = 10
-
-batch_size = 512
-num_epoch  = 20
-
-n_hidden = 512
-n_latent = 128
-
-learning_rate = 1e-3
-
-date_time = datetime.datetime.now().strftime("%Y%m%d-%H-%M-%S")
-
-load_model = False
-train_model = True
-
-save_path = "./saved_models/" + date_time + "_" + algorithm
-load_path = "./saved_models/20190809-11-04-47_VAE_MNIST/model/model" 
-
-mnist = tf.keras.datasets.mnist.load_data(path='mnist.npz')
-
-
-x_train = mnist[0][0]
-y_train = mnist[0][1]
-x_test  = mnist[1][0]
-y_test  = mnist[1][1]
-
-x_train = np.reshape(x_train, [-1, data_size])
-x_test  = np.reshape(x_test, [-1, data_size])
-
-print('x_train shape: {}'.format(x_train.shape))
-print('y_train shape: {}'.format(y_train.shape))
-print('x_test shape: {}'.format(x_test.shape))
-print('y_test shape: {}'.format(y_test.shape))
-
-
-x = tf.placeholder(tf.float32, shape=[None, data_size])
-x_normalize = tf.cast(x, tf.float32) / 255.0
-
-keep_prob_encoder = tf.placeholder(tf.float32)
-keep_prob_decoder = tf.placeholder(tf.float32)
-
-loss, mean, std, z, y = VAE(x_normalize, keep_prob_encoder, keep_prob_decoder) 
-
-# optimization
-train_step = tf.train.AdamOptimizer(learning_rate).minimize(loss)
-
-
-# Initialize variables
-config = tf.ConfigProto()
-config.gpu_options.allow_growth = True
-
-sess = tf.InteractiveSession(config=config)
-
-init = tf.global_variables_initializer()
-sess.run(init)
-
-
-Saver = tf.train.Saver()
-
-if train_model:
-    # Training
-    data_x = x_train
-    len_data = x_train.shape[0]
-
-    for i in range(num_epoch):
-        # Shuffle the data 
-        np.random.shuffle(data_x)
-
-        # Making mini-batch
-        for j in range(0, len_data, batch_size):
-            if j + batch_size < len_data:
-                data_x_in = data_x[j : j + batch_size, :]
-            else:
-                data_x_in = data_x[j : len_data, :]
-
-            # Run Optimizer!
-            _, loss_train = sess.run([train_step, loss], feed_dict = {x: data_x_in, keep_prob_encoder: 0.9, keep_prob_decoder: 0.9})
-
-            #print("Batch: {} / {}".format(j, len_data), end="\r")
-
-        print("Epoch: " + str(i+1) + ' / ' + "Loss: " + str(loss_train))
-
-
-num_test = 10
-
-for i in range(num_test):
-    idx = random.randint(0,x_test.shape[0])
-    
-    output, mu, sigma = sess.run([y, mean, std], feed_dict = {x: [x_test[idx,:]], keep_prob_encoder: 1, keep_prob_decoder: 1})
-
-    input_reshape  = np.reshape(x_test[idx,:], [img_size, img_size])
-    output_reshape = np.reshape(output, [img_size, img_size])
-
-    f, ax = plt.subplots(1,2)
-    ax[0].imshow(input_reshape, cmap = 'gray')
-    ax[0].axis('off')
-    ax[0].set_title('Original Image')
-
-    ax[1].imshow(output_reshape, cmap = 'gray')
-    ax[1].axis('off')
-    ax[1].set_title('Reconstructed Image')
-
-plt.show()
-
-print("Average mu: {}".format(np.mean(mu)))
-print("Average std: {}".format(np.mean(sigma)))
-
-
-for i in range(num_test):
-    z1 = np.random.normal(0, 1, n_latent)
-    z2 = np.random.normal(0, 1, n_latent)
-
-    output_list = []
-
-    for j in range(11):
-        z_in = (j/10) * z1 + (1 - (j/10)) * z2
-
-        output = sess.run([y], feed_dict = {z: [z_in], keep_prob_decoder: 1})
-        output_reshape = np.reshape(output, [img_size, img_size])
-
-        output_list.append(output_reshape)
-
-    f, ax = plt.subplots(1,11,figsize=(20,15))
-
-    for j in range(len(output_list)):
-        ax[j].imshow(output_list[j], cmap = 'gray')
-        ax[j].axis('off')
-
-    plt.show()
-    
-    
+    return synth_data

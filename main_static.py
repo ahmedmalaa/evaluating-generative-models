@@ -23,7 +23,9 @@ import pickle
 
 
 #%% Import functions
-from adsgan import adsgan
+from adsgan import gan
+from vae import vae
+
 
 from metrics.feature_distribution import feature_distribution
 from metrics.compute_wd import compute_wd
@@ -35,7 +37,7 @@ def load_breast_cancer_data():
     data = load_breast_cancer()
     X = MinMaxScaler().fit_transform(data.data)
     df = pd.DataFrame(X, columns=data.feature_names)
-    target = 'label'
+    target = 'target'
     df[target] = data.target
     df = df.dropna(axis=0, how='any')
     return df
@@ -43,9 +45,12 @@ def load_breast_cancer_data():
 
 def load_covid_data(original_data_dir):
     df = pd.read_csv(f'{original_data_dir}/brazilian_covid_data.csv')
-    df.rename(columns={'is_dead':'label'},inplace=True)
+    df.rename(columns={'is_dead':'target'},inplace=True)
+    # drop redundant columns that are contained in other columns
     df = df.drop(columns=['Sex','Race','SG_UF_NOT','Age_40','Age_40_50',
                       'Age_50_60','Age_60_70','Age_70'])
+    X = MinMaxScaler().fit_transform(df)
+    df = pd.DataFrame(X,columns = df.columns)
     return df
 
     
@@ -97,7 +102,8 @@ def feature_importance_comparison(X,y, X_s, y_s):
     print('Correlation of importances:')
     print(np.corrcoef(importances,importances_s)[0,1])
     
-    bar_comparison([importances, importances_s], [std, std_s])
+    bar_comparison([importances, importances_s], 
+                   [std, std_s], save_name = 'feat_importance')
 
     
 def cv_predict_scores(X, y, classifier, n_splits=6):
@@ -130,8 +136,7 @@ def cv_predict_scores(X, y, classifier, n_splits=6):
     
     X = np.array(X)
     y = np.array(y)
-    #y = OneHotEncoder().fit_transform(y_o.reshape(-1,1))
-    #print(y.shape)    
+    
     for i, (train, test) in enumerate(cv.split(X, y)):
         classifier.fit(X[train], y[train])
         accs[i] = classifier.score(X[test], y[test])
@@ -155,8 +160,7 @@ def transfer_scores(X, y, X_s, y_s, classifier):
     y = np.array(y)
     X_s = np.array(X_s)
     y_s = np.array(y_s)
-    #y = OneHotEncoder().fit_transform(y_o.reshape(-1,1))
-    #print(y.shape)    
+    
     classifier.fit(X_s, y_s)
     acc = classifier.score(X, y)
         
@@ -172,6 +176,7 @@ def predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y, models=None):
               KNeighborsClassifier(), 
               MLPClassifier(max_iter=1000),
               RandomForestClassifier()]
+        model_names = ['LogReg', 'KNeighbour', 'MLP', 'RandForest']
     num_models = len(models)
     accs = np.zeros(num_models)
     aucs = np.zeros(num_models)
@@ -218,14 +223,17 @@ def predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y, models=None):
     
     # plot results
     plt.close('all')
-    bar_comparison([accs, synth_accs, transf_accs], [std_accs, std_synth_accs, std_transf_accs], tick_names=models)
-    plt.title('acc')
-    bar_comparison([aucs, synth_aucs, transf_aucs], [std_aucs, std_synth_aucs, std_transf_aucs], tick_names=models)
-    plt.title('auc')    
+    bar_comparison([accs, synth_accs, transf_accs], 
+                   [std_accs, std_synth_accs, std_transf_accs], 
+                   tick_names=model_names, save_name = 'pred_accs')
+    bar_comparison([aucs, synth_aucs, transf_aucs], 
+                   [std_aucs, std_synth_aucs, std_transf_aucs], 
+                   tick_names=model_names, save_name = 'pred_aucs')
+       
     
 #%% Misc
     
-def bar_comparison(vectors, std=None, labels=None, tick_names=None):
+def bar_comparison(vectors, std=None, labels=None, tick_names=None, save_name = None):
     
     num_bars = len(vectors)
     vector = vectors[0]
@@ -256,6 +264,8 @@ def bar_comparison(vectors, std=None, labels=None, tick_names=None):
     plt.xticks(x, ticks)
     plt.legend()
     plt.xlim([-1, len(vector)])
+    if save_name is not None:
+        plt.savefig(f'{visual_dir}/{dataset}_{method}_{save_name}.jpg')
     plt.show()
 
 
@@ -305,23 +315,29 @@ def roc(X, y, classifier, n_splits=6, pos_label = 2):
     ax.set(xlim=[-0.05, 1.05], ylim=[-0.05, 1.05],
            title="Receiver operating characteristic example")
     ax.legend(loc="lower right")
+    
     plt.show()
     
     return mean_auc, mean_acc    
 
 
 #%%  
+
 if __name__ == '__main__':
+    plt.close('all')
+    
+    
     # Data loading
-    dataset = 'covid'
-    method = 'adsgan'
-    train = False
+    dataset = 'bc'
+    method = 'vae' #adsgan, wgan, gan, vae
+    train = True
     
     #Save synthetic data iff we're training
-    save_synth = train
+    save_synth = False#train
     
     original_data_dir = 'data/original'
     synth_data_dir = 'data/synth'
+    visual_dir = 'visualisations'
     filename =  f'{synth_data_dir}/{dataset}_{method}.csv'
     
         
@@ -332,7 +348,11 @@ if __name__ == '__main__':
     params["h_dim"] = 30
     params["z_dim"] = 10
     params["mb_size"] = 128
+    params['gen_model_name'] = method
     
+    if method != 'adsgan':
+        params['lamda'] = 0
+        
     train_ratio = 0.8
     
     # Load data
@@ -345,41 +365,41 @@ if __name__ == '__main__':
     
     # Synthetic data generation
     if train:
-        if method == 'adsgan':
-            synth_data = adsgan(orig_data, params)
+        if method in ['wgan','gan', 'adsgan']:
+            synth_data = gan(orig_data, params)
+        elif method=='vae':
+            synth_data = vae(orig_data, params)
             
-        elif method=='VAE':
-            pass
-            
-        pickle.dump((synth_data, params),open(filename,'wb'))
+        if save_synth:
+            pickle.dump((synth_data, params),open(filename,'wb'))
     
     else:
         synth_data, params = pickle.load(open(filename,'rb'))
     
-    ### Performance measures from ADS-GAN paper
+    ## Performance measures from ADS-GAN paper
     # (1) Feature marginal distributions
-    # feat_dist = feature_distribution(orig_data, synth_data)
-    # print("Finish computing feature distributions")
+    feat_dist = feature_distribution(orig_data, synth_data)
+    print("Finish computing feature distributions")
     
-    # # (2) Wasserstein Distance (WD)
-    # print("Start computing Wasserstein Distance")
-    # wd_measure = compute_wd(orig_data, synth_data, params)
-    # print("WD measure: " + str(wd_measure))
+    # (2) Wasserstein Distance (WD)
+    print("Start computing Wasserstein Distance")
+    wd_measure = compute_wd(orig_data, synth_data, params)
+    print("WD measure: " + str(wd_measure))
     
-    # # (3) Identifiability 
-    # identifiability = compute_identifiability(orig_data, synth_data)
-    # print("Identifiability measure: " + str(identifiability))
+    # (3) Identifiability 
+    identifiability = compute_identifiability(orig_data, synth_data)
+    print("Identifiability measure: " + str(identifiability))
     
     
     # Some differentd data definitions
     synth_data = pd.DataFrame(synth_data,columns = orig_data.columns)
     orig_train_index = round(len(orig_data)*train_ratio)
-    orig_X, orig_Y = orig_data.drop(columns=['label']), orig_data.label
+    orig_X, orig_Y = orig_data.drop(columns=['target']), orig_data.target
     orig_X_train, orig_X_test = orig_X[:orig_train_index], orig_X[orig_train_index:]
     orig_Y_train, orig_Y_test = orig_Y[:orig_train_index], orig_Y[orig_train_index:]
     
     synth_train_index = round(len(synth_data)*train_ratio)
-    synth_X, synth_Y = synth_data.drop(columns=['label']), synth_data.label
+    synth_X, synth_Y = synth_data.drop(columns=['target']), synth_data.target
     synth_X_train, synth_X_test = synth_X[:synth_train_index], synth_X[synth_train_index:]
     synth_Y_train, synth_Y_test = synth_Y[:synth_train_index], synth_Y[synth_train_index:]
     
@@ -392,7 +412,6 @@ if __name__ == '__main__':
     # between the synthetic and original dataset
     plt.close('all')
     predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y)
-    
     
     
     # example of ROC computation

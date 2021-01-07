@@ -1,6 +1,4 @@
-"""Anonymization through Data Synthesis using Generative Adversarial Networks:
-A harmonizing advancement for AI in medicine (ADS-GAN) Codebase.
-
+"""
 Reference: Jinsung Yoon, Lydia N. Drumright, Mihaela van der Schaar, 
 "Anonymization through Data Synthesis using Generative Adversarial Networks (ADS-GAN):
 A harmonizing advancement for AI in medicine," 
@@ -8,9 +6,11 @@ IEEE Journal of Biomedical and Health Informatics (JBHI), 2019.
 Paper link: https://ieeexplore.ieee.org/document/9034117
 Last updated Date: December 22th 2020
 Code author: Jinsung Yoon (jsyoon0823@gmail.com)
+
+Minor modifications made by Boris van Breugel (bv292@cam.ac.uk)
 -----------------------------
 adsgan.py
-- Generate synthetic data for ADSGAN framework
+- Generate synthetic data for GAN framework
 (1) Use original data to generate synthetic data
 """
 
@@ -21,7 +21,7 @@ import numpy as np
 from tqdm import tqdm
 
 
-def adsgan(orig_data, params):
+def gan(orig_data, params):
   """Generate synthetic data for ADSGAN framework.
   
   Args:
@@ -56,7 +56,8 @@ def adsgan(orig_data, params):
   lamda = params['lamda']
   # Training iterations
   iterations = params['iterations']
-  
+  # GAN type
+  gen_model_name = params['gen_model_name']
   # WGAN-GP parameters
   lam = 10
   lr = 1e-4    
@@ -157,25 +158,32 @@ def adsgan(orig_data, params):
   G_sample = generator(Z,X)
   D_real = discriminator(X)
   D_fake = discriminator(G_sample) 
-    
+  
+  if gen_model_name == 'adsgan' or gen_model_name=='wgan':
+      
   # Replacement of Clipping algorithm to Penalty term
   # 1. Line 6 in Algorithm 1
-  eps = tf.random_uniform([mb_size, 1], minval = 0., maxval = 1.)
-  X_inter = eps*X + (1. - eps) * G_sample
-
-  # 2. Line 7 in Algorithm 1
-  grad = tf.gradients(discriminator(X_inter), [X_inter])[0]
-  grad_norm = tf.sqrt(tf.reduce_sum((grad)**2 + 1e-8, axis = 1))
-  grad_pen = lam * tf.reduce_mean((grad_norm - 1)**2)
-
-  # Loss function
-  D_loss = tf.reduce_mean(D_fake) - tf.reduce_mean(D_real) + grad_pen
+      eps = tf.random_uniform([mb_size, 1], minval = 0., maxval = 1.)
+      X_inter = eps*X + (1. - eps) * G_sample
     
+      # 2. Line 7 in Algorithm 1
+      grad = tf.gradients(discriminator(X_inter), [X_inter])[0]
+      grad_norm = tf.sqrt(tf.reduce_sum((grad)**2 + 1e-8, axis = 1))
+      grad_pen = lam * tf.reduce_mean((grad_norm - 1)**2)
+    
+      # Loss function
+      D_loss = tf.reduce_mean(D_fake) - tf.reduce_mean(D_real) + grad_pen
+      
+      
+      
+  elif gen_model_name == 'gan':
+      D_loss = tf.reduce_mean(D_fake) - tf.reduce_mean(D_real)
+  
   G_loss1 = -tf.sqrt(tf.reduce_mean(tf.square(X - G_sample)))
   G_loss2 = -tf.reduce_mean(D_fake)
-    
+  
   G_loss = G_loss2 + lamda * G_loss1
-
+  
   # Solver
   D_solver = (tf.train.AdamOptimizer(learning_rate = lr, beta1 = 0.5).minimize(D_loss, var_list = theta_D))
   G_solver = (tf.train.AdamOptimizer(learning_rate = lr, beta1 = 0.5).minimize(G_loss, var_list = theta_G))
