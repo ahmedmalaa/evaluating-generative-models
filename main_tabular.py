@@ -23,8 +23,8 @@ import pickle
 
 
 #%% Import functions
-from adsgan import gan
-from vae import vae
+from generative_models.adsgan import adsgan
+from generative_models.vae import vae
 
 
 from metrics.feature_distribution import feature_distribution
@@ -366,7 +366,7 @@ if __name__ == '__main__':
     # Synthetic data generation
     if train:
         if method in ['wgan','gan', 'adsgan']:
-            synth_data = gan(orig_data, params)
+            synth_data = adsgan(orig_data, params)
         elif method=='vae':
             synth_data = vae(orig_data, params)
             

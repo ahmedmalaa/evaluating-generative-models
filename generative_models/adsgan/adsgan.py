@@ -7,7 +7,7 @@ Paper link: https://ieeexplore.ieee.org/document/9034117
 Last updated Date: December 22th 2020
 Code author: Jinsung Yoon (jsyoon0823@gmail.com)
 
-Minor modifications made by Boris van Breugel (bv292@cam.ac.uk)
+Minor modifications made by Boris van Breugel (bv292@cam.ac.uk) and Evgeny Saveliev (e.s.saveliev@gmail.com).
 -----------------------------
 adsgan.py
 - Generate synthetic data for GAN framework
@@ -21,7 +21,7 @@ import numpy as np
 from tqdm import tqdm
 
 
-def gan(orig_data, params):
+def adsgan(orig_data, params):
   """Generate synthetic data for ADSGAN framework.
   
   Args:

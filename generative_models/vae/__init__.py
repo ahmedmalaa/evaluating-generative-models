@@ -1,0 +1,1 @@
+from .vae import vae  # Allows to import as `from generative_models.vae import vae`
