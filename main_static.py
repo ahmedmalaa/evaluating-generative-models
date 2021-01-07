@@ -11,19 +11,23 @@ from sklearn.neural_network import MLPClassifier
 from sklearn import metrics
 from sklearn.model_selection import StratifiedKFold
 from sklearn.datasets import load_breast_cancer
-from sklearn.preprocessing import MinMaxScaler, OneHotEncoder
+from sklearn.preprocessing import MinMaxScaler
 
 import matplotlib.pyplot as plt
 
 import pandas as pd
 import numpy as np
 
+
+import pickle
+
+
 #%% Import functions
 from adsgan import adsgan
-from adsgan.metrics.feature_distribution import feature_distribution
-from metrics.compute_wd import compute_wd
-from adsgan.metrics.compute_identifiability import compute_identifiability
 
+from metrics.feature_distribution import feature_distribution
+from metrics.compute_wd import compute_wd
+from metrics.compute_identifiability import compute_identifiability
 
 #%% Data loading
 
@@ -36,6 +40,15 @@ def load_breast_cancer_data():
     df = df.dropna(axis=0, how='any')
     return df
 
+
+def load_covid_data(original_data_dir):
+    df = pd.read_csv(f'{original_data_dir}/brazilian_covid_data.csv')
+    df.rename(columns={'is_dead':'label'},inplace=True)
+    df = df.drop(columns=['Sex','Race','SG_UF_NOT','Age_40','Age_40_50',
+                      'Age_50_60','Age_60_70','Age_70'])
+    return df
+
+    
 
 #%% Feature importance plots
 
@@ -84,7 +97,7 @@ def feature_importance_comparison(X,y, X_s, y_s):
     print('Correlation of importances:')
     print(np.corrcoef(importances,importances_s)[0,1])
     
-    bar_comparison(importances, importances_s, std, std_s)
+    bar_comparison([importances, importances_s], [std, std_s])
 
     
 def cv_predict_scores(X, y, classifier, n_splits=6):
@@ -121,9 +134,9 @@ def cv_predict_scores(X, y, classifier, n_splits=6):
     #print(y.shape)    
     for i, (train, test) in enumerate(cv.split(X, y)):
         classifier.fit(X[train], y[train])
-        accs[i] = model.score(X[test], y[test])
+        accs[i] = classifier.score(X[test], y[test])
         
-        scores = model.predict_proba(X[test])
+        scores = classifier.predict_proba(X[test])
         
         auc = metrics.roc_auc_score(y[test], scores[:,1])
         aucs[i] = auc
@@ -145,33 +158,102 @@ def transfer_scores(X, y, X_s, y_s, classifier):
     #y = OneHotEncoder().fit_transform(y_o.reshape(-1,1))
     #print(y.shape)    
     classifier.fit(X_s, y_s)
-    acc = model.score(X, y)
+    acc = classifier.score(X, y)
         
-    scores = model.predict_proba(X)        
+    scores = classifier.predict_proba(X)        
     auc = metrics.roc_auc_score(y, scores[:,1])
     
     return acc, auc
     
+
+def predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y, models=None):
+    if models is None:
+        models = [LogisticRegression(), 
+              KNeighborsClassifier(), 
+              MLPClassifier(max_iter=1000),
+              RandomForestClassifier()]
+    num_models = len(models)
+    accs = np.zeros(num_models)
+    aucs = np.zeros(num_models)
+    synth_accs = np.zeros(num_models)
+    synth_aucs = np.zeros(num_models)
+    transf_accs = np.zeros(num_models)
+    transf_aucs = np.zeros(num_models)
+    std_accs = np.zeros(num_models)
+    std_aucs = np.zeros(num_models)
+    std_synth_accs = np.zeros(num_models)
+    std_synth_aucs = np.zeros(num_models)
+    std_transf_accs = np.zeros(num_models)
+    std_transf_aucs = np.zeros(num_models)
+    
+    
+    for i, model in enumerate(models):
+        print('### Predictability scores for model', model)
+        #original dataset performance
+        acc, auc, std_acc, std_auc = cv_predict_scores(orig_X, orig_Y, model)
+        print('Accuracy original:', acc)
+        print('AUC original     :', auc)
+        accs[i] = acc
+        aucs[i] = auc
+        std_accs[i] = std_acc
+        std_aucs[i] = std_auc
+    
+        #synthetic dataset performance
+        acc, auc, std_acc, std_auc = cv_predict_scores(synth_X, synth_Y, model)
+        print('Accuracy synthetic:', acc)
+        print('AUC synthetic     :', auc)
+        synth_accs[i] = acc
+        synth_aucs[i] = auc
+        std_synth_accs[i] = std_acc
+        std_synth_aucs[i] = std_auc
+        
+        ## how training on synthetic data performs on original data
+        acc, auc = transfer_scores(orig_X, orig_Y, synth_X, synth_Y, model)
+        print('Accuracy transfer:', acc)
+        print('AUC transfer     :', auc)
+        transf_accs[i] = acc
+        transf_aucs[i] = auc
+        std_transf_accs[i] = std_acc
+        std_transf_aucs[i] = std_auc              
+    
+    # plot results
+    plt.close('all')
+    bar_comparison([accs, synth_accs, transf_accs], [std_accs, std_synth_accs, std_transf_accs], tick_names=models)
+    plt.title('acc')
+    bar_comparison([aucs, synth_aucs, transf_aucs], [std_aucs, std_synth_aucs, std_transf_aucs], tick_names=models)
+    plt.title('auc')    
+    
 #%% Misc
     
-def bar_comparison(vector, vector_s, std=None, std_s=None):
+def bar_comparison(vectors, std=None, labels=None, tick_names=None):
     
+    num_bars = len(vectors)
+    vector = vectors[0]
     indices = np.argsort(vector)[::-1]
     fig, ax = plt.subplots()
-    width = 0.35
-    x = np.arange(len(vector))
-    if std is not None:
-        std = std[indices]
-    if std_s is not None:
-        std_s = std_s[indices]
+    tot_bar_width = 0.7
+    width = tot_bar_width/num_bars
+    x = np.arange(len(vector)) 
     
-    ax.bar(x - width/2, vector[indices],  yerr=std,width=width, label='Original')
-    ax.bar(x + width/2, vector_s[indices],  yerr=std_s, width=width, label='Synthetic')
-    #df.set_index('a', inplace=True)
+    if tick_names is None:
+        tick_names = range(len(vector))
+    
+    if labels is None:
+        labels = ['Original', 'Synthetic', 'Transfer']
+    
+    for i, vec in enumerate(vectors):
+        xbar = x - tot_bar_width/2 + (i+1/2)*width
+        if std is not None:    
+            ax.bar(xbar, vec[indices],  yerr=std[i][indices], width=width, label=labels[i])
+        else:
+            ax.bar(xbar, vec[indices], width=width, label=labels[i])
+
+#df.set_index('a', inplace=True)
     ax.set_ylim(bottom=0)
     fig.tight_layout()
-    tick_names = indices # X.columns[indices]
-    plt.xticks(x, tick_names)
+    ticks = np.array(tick_names, dtype='object')
+    ticks = ticks[indices]
+    plt.xticks(x, ticks)
     plt.legend()
     plt.xlim([-1, len(vector)])
     plt.show()
@@ -190,7 +272,7 @@ def roc(X, y, classifier, n_splits=6, pos_label = 2):
     y = np.array(y)
     for i, (train, test) in enumerate(cv.split(X, y)):
         classifier.fit(X[train], y[train])
-        accs[i] = model.score(X[test], y[test])
+        accs[i] = classifier.score(X[test], y[test])
         
         viz = metrics.plot_roc_curve(classifier, X[test], y[test],
                          name='ROC fold {}'.format(i),
@@ -231,37 +313,62 @@ def roc(X, y, classifier, n_splits=6, pos_label = 2):
 #%%  
 if __name__ == '__main__':
     # Data loading
-    orig_data = load_breast_cancer_data()  
-    
-    
-    # Synthetic data method definition and generation
+    dataset = 'covid'
     method = 'adsgan'
-    if method == 'adsgan':
-        params = dict()
-        params["lamda"] = 0.1
-        params["iterations"] = 10000
-        params["h_dim"] = 30
-        params["z_dim"] = 10
-        params["mb_size"] = 128
-        
-        train_ratio = 0.8
-        
-        synth_data = adsgan(orig_data, params)
+    train = False
     
+    #Save synthetic data iff we're training
+    save_synth = train
+    
+    original_data_dir = 'data/original'
+    synth_data_dir = 'data/synth'
+    filename =  f'{synth_data_dir}/{dataset}_{method}.csv'
+    
+        
+    # parameters for ADS-GAN and Wasserstein distance metrics
+    params = dict()
+    params["lamda"] = 0.1
+    params["iterations"] = 10000
+    params["h_dim"] = 30
+    params["z_dim"] = 10
+    params["mb_size"] = 128
+    
+    train_ratio = 0.8
+    
+    # Load data
+    if dataset == 'bc':
+        orig_data = load_breast_cancer_data()  
+    elif dataset == 'covid':
+        orig_data = load_covid_data(original_data_dir)  
+    
+    
+    
+    # Synthetic data generation
+    if train:
+        if method == 'adsgan':
+            synth_data = adsgan(orig_data, params)
+            
+        elif method=='VAE':
+            pass
+            
+        pickle.dump((synth_data, params),open(filename,'wb'))
+    
+    else:
+        synth_data, params = pickle.load(open(filename,'rb'))
     
     ### Performance measures from ADS-GAN paper
     # (1) Feature marginal distributions
-    feat_dist = feature_distribution(orig_data, synth_data)
-    print("Finish computing feature distributions")
+    # feat_dist = feature_distribution(orig_data, synth_data)
+    # print("Finish computing feature distributions")
     
-    # (2) Wasserstein Distance (WD)
-    print("Start computing Wasserstein Distance")
-    wd_measure = compute_wd(orig_data, synth_data, params)
-    print("WD measure: " + str(wd_measure))
+    # # (2) Wasserstein Distance (WD)
+    # print("Start computing Wasserstein Distance")
+    # wd_measure = compute_wd(orig_data, synth_data, params)
+    # print("WD measure: " + str(wd_measure))
     
-    # (3) Identifiability 
-    identifiability = compute_identifiability(orig_data, synth_data)
-    print("Identifiability measure: " + str(identifiability))
+    # # (3) Identifiability 
+    # identifiability = compute_identifiability(orig_data, synth_data)
+    # print("Identifiability measure: " + str(identifiability))
     
     
     # Some differentd data definitions
@@ -283,53 +390,8 @@ if __name__ == '__main__':
     ## RANKING: 
     # how ranking (accuracy and AUC) of different models compares
     # between the synthetic and original dataset
-    
-    models = [LogisticRegression(), 
-              KNeighborsClassifier(), 
-              #MLPClassifier(),
-              RandomForestClassifier()]
-    num_models = len(models)
-    accs = np.zeros(num_models)
-    aucs = np.zeros(num_models)
-    synth_accs = np.zeros(num_models)
-    synth_aucs = np.zeros(num_models)
-    transf_accs = np.zeros(num_models)
-    transf_aucs = np.zeros(num_models)
-    
-    
-    for i, model in enumerate(models):
-        print('### Predictability scores for model', model)
-        #original dataset performance
-        acc, auc, std_acc, std_auc = cv_predict_scores(orig_X, orig_Y, model)
-        print('Accuracy original:', acc)
-        print('AUC original     :', auc)
-        accs[i] = acc
-        aucs[i] = auc
-    
-        #synthetic dataset performance
-        acc, auc, std_acc, std_auc = cv_predict_scores(synth_X, synth_Y, model)
-        print('Accuracy synthetic:', acc)
-        print('AUC synthetic     :', auc)
-        synth_accs[i] = acc
-        synth_aucs[i] = auc
-        
-        ## how training on synthetic data performs on original data
-        acc, auc = transfer_scores(orig_X, orig_Y, synth_X, synth_Y, model)
-        print('Accuracy transfer:', acc)
-        print('AUC transfer     :', auc)
-        transf_accs[i] = acc
-        transf_aucs[i] = auc
-        
-        
-    
-    # plot results
     plt.close('all')
-    bar_comparison(accs, synth_accs)
-    plt.title('acc')
-    bar_comparison(aucs, synth_aucs)
-    plt.title('auc')    
-    plt.title('Transfer accuracy')
-    bar_comparison(accs, transf_accs)
+    predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y)
     
     
     
@@ -337,9 +399,8 @@ if __name__ == '__main__':
     #roc(synth_X, synth_Y, LogisticRegression())
     
     
-   ### Feature importance between orig and synth data
-    #plt.close('all')
-    #feature_importance_comparison(orig_X, orig_Y, synth_X, synth_Y)
+    ### Feature importance between orig and synth data
+    feature_importance_comparison(orig_X, orig_Y, synth_X, synth_Y)
      
     
 
