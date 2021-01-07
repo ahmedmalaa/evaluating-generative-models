@@ -30,7 +30,7 @@ def adsgan(orig_data, params):
       mb_size: mini-batch size
       z_dim: random state dimension
       h_dim: hidden state dimension
-      lamda: identifiability parameter
+      lambda: identifiability parameter
       iterations: training iterations
       
   Returns:
@@ -53,7 +53,7 @@ def adsgan(orig_data, params):
   # Hidden unit dimensions
   h_dim = params['h_dim']    
   # Identifiability parameter
-  lamda = params['lamda']
+  lambda_ = params['lambda']
   # Training iterations
   iterations = params['iterations']
   # GAN type
@@ -182,7 +182,7 @@ def adsgan(orig_data, params):
   G_loss1 = -tf.sqrt(tf.reduce_mean(tf.square(X - G_sample)))
   G_loss2 = -tf.reduce_mean(D_fake)
   
-  G_loss = G_loss2 + lamda * G_loss1
+  G_loss = G_loss2 + lambda_ * G_loss1
   
   # Solver
   D_solver = (tf.train.AdamOptimizer(learning_rate = lr, beta1 = 0.5).minimize(D_loss, var_list = theta_D))
