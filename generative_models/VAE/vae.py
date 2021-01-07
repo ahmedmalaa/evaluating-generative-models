@@ -1,16 +1,11 @@
 """
-Reference: Jinsung Yoon, Lydia N. Drumright, Mihaela van der Schaar, 
-"Anonymization through Data Synthesis using Generative Adversarial Networks (ADS-GAN):
-A harmonizing advancement for AI in medicine," 
-IEEE Journal of Biomedical and Health Informatics (JBHI), 2019.
-Paper link: https://ieeexplore.ieee.org/document/9034117
-Last updated Date: December 22th 2020
-Code author: Jinsung Yoon (jsyoon0823@gmail.com)
+Code author: Boris van Breugel (bv292@cam.ac.uk)
 
-Minor modifications made by Boris van Breugel (bv292@cam.ac.uk)
+Based on code by Jinsung Yoon (jsyoon0823@gmail.com)
+	
 -----------------------------
-adsgan.py
-- Generate synthetic data for GAN framework
+
+Generate synthetic data with VAE framework
 (1) Use original data to generate synthetic data
 """
 
@@ -43,7 +38,7 @@ def vae(orig_data, params):
     ## Parameters                
     # Feature no
     x_dim = len(orig_data.columns)                
-    # Sample no
+    # X_recon no
     no = len(orig_data)                
     
     # Batch size                
@@ -92,22 +87,22 @@ def vae(orig_data, params):
         xavier_stddev = 1. / tf.sqrt(in_dim / 2.)
         return tf.random_normal(shape = size, stddev = xavier_stddev)                
                             
-    # Sample from uniform distribution
-    def sample_Z(m, n):
+    # X_recon from uniform distribution
+    def X_recon_Z(m, n):
         return np.random.randn(size = [m, n])
                             
-    # Sample from the real data
-    def sample_X(m, n):
+    # X_recon from the real data
+    def X_recon_X(m, n):
         return np.random.permutation(m)[:n]        
              
     #%% Placeholder
     # Feature
     X = tf.placeholder(tf.float32, shape = [None, x_dim])         
-    sample = tf.placeholder(tf.float32, shape = [None, x_dim])         
+    X_recon = tf.placeholder(tf.float32, shape = [None, x_dim])         
     # Random Variable                
     Z = tf.placeholder(tf.float32, shape = [None, z_dim])
-    MU = tf.placeholder(tf.float32, shape = [None, z_dim])
-    LOGVAR = tf.placeholder(tf.float32, shape = [None, z_dim])
+    mu = tf.placeholder(tf.float32, shape = [None, z_dim])
+    logvar = tf.placeholder(tf.float32, shape = [None, z_dim])
     
     
     #%% Encoder
@@ -159,16 +154,16 @@ def vae(orig_data, params):
         
         
     #%% Structure
-    MU, LOGVAR = encoder(X)
-    Z = MU + tf.exp(LOGVAR/2) * tf.random_normal(tf.shape(MU), 0, 1, dtype=tf.float32)
+    mu, logvar = encoder(X)
+    Z = mu + tf.exp(logvar/2) * tf.random_normal(tf.shape(mu), 0, 1, dtype=tf.float32)
     
-    sample = decoder(Z)
-    
-    
+    X_recon = decoder(Z)
     
     
-    loss1 = tf.reduce_mean(tf.square(sample-X))
-    loss2 = 0.5 * tf.reduce_mean(tf.square(MU) + tf.exp(LOGVAR) - LOGVAR - 1, 1)
+    
+    
+    loss1 = tf.reduce_mean(tf.square(X_recon-X))
+    loss2 = 0.5 * tf.reduce_mean(tf.square(mu) + tf.exp(logvar) - logvar - 1, 1)
     
     loss = loss1 + loss2
     # Solver
@@ -183,13 +178,13 @@ def vae(orig_data, params):
     for it in tqdm(range(iterations)):
             # Discriminator training
                       
-            X_idx = sample_X(no,mb_size)                                
+            X_idx = X_recon_X(no,mb_size)                                
             X_mb = orig_data[X_idx,:]        
                                                                             
             _, E_loss1_curr, E_loss2_curr = sess.run([solver, loss1, loss2], feed_dict = {X: X_mb})
             
     #%% Output Generation
-    synth_data = sess.run([sample], feed_dict = {X: orig_data})
+    synth_data = sess.run([X_recon], feed_dict = {X: orig_data})
     synth_data = synth_data[0]
             
     # Renormalization

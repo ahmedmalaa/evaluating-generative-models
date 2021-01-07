@@ -328,12 +328,12 @@ if __name__ == '__main__':
     
     
     # Data loading
-    dataset = 'bc'
-    method = 'vae' #adsgan, wgan, gan, vae
-    train = True
+    dataset = 'covid'
+    method = 'adsgan' #adsgan, wgan, gan, vae
+    train = False
     
     #Save synthetic data iff we're training
-    save_synth = False#train
+    save_synth = train
     
     original_data_dir = 'data/original'
     synth_data_dir = 'data/synth'
