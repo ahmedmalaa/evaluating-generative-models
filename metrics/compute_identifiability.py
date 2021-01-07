@@ -20,54 +20,54 @@ from scipy.stats import entropy
 
 # Function start
 def compute_identifiability (orig_data, synth_data):
-  """Compare Wasserstein distance between original data and synthetic data.
-  
-  Args:
-    orig_data: original data
-    synth_data: synthetically generated data
-      
-  Returns:
-    WD_value: Wasserstein distance
-  """
-  
-  # Entropy computation
-  def compute_entropy(labels):
-    value,counts = np.unique(np.round(labels), return_counts=True)
-    return entropy(counts)
-  
-  # Original data
-  orig_data = np.asarray(orig_data)
+    """Compare Wasserstein distance between original data and synthetic data.
+    
+    Args:
+        orig_data: original data
+        synth_data: synthetically generated data
+            
+    Returns:
+        WD_value: Wasserstein distance
+    """
+    
+    # Entropy computation
+    def compute_entropy(labels):
+        value,counts = np.unique(np.round(labels), return_counts=True)
+        return entropy(counts)
+    
+    # Original data
+    orig_data = np.asarray(orig_data)
+                
+    # Parameters
+    no, x_dim = np.shape(orig_data)
         
-  # Parameters
-  no, x_dim = np.shape(orig_data)
+    #%% Weights
+    W = np.zeros([x_dim,])
+        
+    for i in range(x_dim):
+        W[i] = compute_entropy(orig_data[:,i])
+        
+    # Normalization
+    orig_data_hat = orig_data.copy()
+    synth_data_hat = synth_data.copy()
+        
+    eps = 0 #1e-16
+    W = np.ones_like(W)
     
-  #%% Weights
-  W = np.zeros([x_dim,])
-    
-  for i in range(x_dim):
-    W[i] = compute_entropy(orig_data[:,i])
-    
-  # Normalization
-  orig_data_hat = orig_data.copy()
-  synth_data_hat = synth_data.copy()
-    
-  eps = 0 #1e-16
-  W = np.ones_like(W)
-  
-  for i in range(x_dim):
-    orig_data_hat[:,i] = orig_data[:,i] * 1./(W[i]+eps)
-    synth_data_hat[:,i] = synth_data[:,i] * 1./(W[i]+eps)
-    
-  #%% r_i computation
-  nbrs = NearestNeighbors(n_neighbors = 2).fit(orig_data_hat)
-  distance, _ = nbrs.kneighbors(orig_data_hat)
+    for i in range(x_dim):
+        orig_data_hat[:,i] = orig_data[:,i] * 1./(W[i]+eps)
+        synth_data_hat[:,i] = synth_data[:,i] * 1./(W[i]+eps)
+        
+    #%% r_i computation
+    nbrs = NearestNeighbors(n_neighbors = 2).fit(orig_data_hat)
+    distance, _ = nbrs.kneighbors(orig_data_hat)
 
-  # hat{r_i} computation
-  nbrs_hat = NearestNeighbors(n_neighbors = 1).fit(synth_data_hat)
-  distance_hat, _ = nbrs_hat.kneighbors(orig_data_hat)
+    # hat{r_i} computation
+    nbrs_hat = NearestNeighbors(n_neighbors = 1).fit(synth_data_hat)
+    distance_hat, _ = nbrs_hat.kneighbors(orig_data_hat)
 
-  # See which one is bigger
-  R_Diff = distance_hat[:,0] - distance[:,1]
-  identifiability_value = np.sum(R_Diff<0) / float(no)
-    
-  return identifiability_value
+    # See which one is bigger
+    R_Diff = distance_hat[:,0] - distance[:,1]
+    identifiability_value = np.sum(R_Diff<0) / float(no)
+        
+    return identifiability_value

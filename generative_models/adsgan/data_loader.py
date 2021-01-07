@@ -18,19 +18,19 @@ data_loader.py
 import pandas as pd
 
 def load_maggic_data():
-  """Load MAGGIC data.
-  
-  Returns:
-    orig_data: Original data in pandas dataframe
-  """
-  # Read csv files
-  file_name = 'data/Maggic.csv'
-  orig_data = pd.read_csv(file_name, sep=',')
+    """Load MAGGIC data.
+    
+    Returns:
+        orig_data: Original data in pandas dataframe
+    """
+    # Read csv files
+    file_name = 'data/Maggic.csv'
+    orig_data = pd.read_csv(file_name, sep=',')
 
-  # Remove NA
-  orig_data = orig_data.dropna(axis=0, how='any')
-        
-  # Remove labels
-  orig_data = orig_data.drop(['death_all','days_to_fu'], axis = 1)
-  
-  return orig_data
+    # Remove NA
+    orig_data = orig_data.dropna(axis=0, how='any')
+                
+    # Remove labels
+    orig_data = orig_data.drop(['death_all','days_to_fu'], axis = 1)
+    
+    return orig_data

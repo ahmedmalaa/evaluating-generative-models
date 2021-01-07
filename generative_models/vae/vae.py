@@ -176,12 +176,12 @@ def vae(orig_data, params):
                             
     # Iterations
     for it in tqdm(range(iterations)):
-            # Discriminator training
-                      
-            X_idx = X_recon_X(no,mb_size)                                
-            X_mb = orig_data[X_idx,:]        
-                                                                            
-            _, E_loss1_curr, E_loss2_curr = sess.run([solver, loss1, loss2], feed_dict = {X: X_mb})
+        # Discriminator training
+                    
+        X_idx = X_recon_X(no,mb_size)
+        X_mb = orig_data[X_idx,:]
+                                                                        
+        _, E_loss1_curr, E_loss2_curr = sess.run([solver, loss1, loss2], feed_dict = {X: X_mb})
             
     #%% Output Generation
     synth_data = sess.run([X_recon], feed_dict = {X: orig_data})
@@ -192,7 +192,7 @@ def vae(orig_data, params):
     
     # Binary features
     for i in range(x_dim):
-            if len(np.unique(orig_data[:, i])) == 2:
-                    synth_data[:, i] = np.round(synth_data[:, i])
+        if len(np.unique(orig_data[:, i])) == 2:
+            synth_data[:, i] = np.round(synth_data[:, i])
      
     return synth_data
