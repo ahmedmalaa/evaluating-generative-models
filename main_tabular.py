@@ -44,7 +44,7 @@ def load_breast_cancer_data():
     return df
 
 
-def load_covid_data(original_data_dir):
+def load_covid_data():
     df = pd.read_csv(f'{original_data_dir}/brazilian_covid_data.csv')
     df.rename(columns={'is_dead':'target'},inplace=True)
     # drop redundant columns that are contained in other columns
@@ -257,7 +257,7 @@ def bar_comparison(vectors, std=None, labels=None, tick_names=None, save_name = 
         else:
             ax.bar(xbar, vec[indices], width=width, label=labels[i])
 
-#df.set_index('a', inplace=True)
+    # df.set_index('a', inplace=True)
     ax.set_ylim(bottom=0)
     fig.tight_layout()
     ticks = np.array(tick_names, dtype='object')
@@ -323,22 +323,21 @@ def roc(X, y, classifier, n_splits=6, pos_label = 2):
 
 
 #%%  
+# Set settings:
+dataset = 'covid'
+method = 'adsgan' #adsgan, wgan, gan, vae
+do_train = False
+original_data_dir = 'data/original'
+synth_data_dir = 'data/synth'
+visual_dir = 'visualisations'
 
-if __name__ == '__main__':
+
+def main():
     plt.close('all')
     
-    
-    # Data loading
-    dataset = 'covid'
-    method = 'adsgan' #adsgan, wgan, gan, vae
-    train = False
-    
     #Save synthetic data iff we're training
-    save_synth = train
+    save_synth = do_train
     
-    original_data_dir = 'data/original'
-    synth_data_dir = 'data/synth'
-    visual_dir = 'visualisations'
     filename =  f'{synth_data_dir}/{dataset}_{method}.csv'
     
         
@@ -360,12 +359,12 @@ if __name__ == '__main__':
     if dataset == 'bc':
         orig_data = load_breast_cancer_data()  
     elif dataset == 'covid':
-        orig_data = load_covid_data(original_data_dir)  
+        orig_data = load_covid_data()  
     
     
     
     # Synthetic data generation
-    if train:
+    if do_train:
         if method in ['wgan','gan', 'adsgan']:
             synth_data = adsgan(orig_data, params)
         elif method=='vae':
@@ -421,8 +420,7 @@ if __name__ == '__main__':
     
     ### Feature importance between orig and synth data
     feature_importance_comparison(orig_X, orig_Y, synth_X, synth_Y)
-     
-    
 
-  
-  
+
+if __name__ == '__main__':
+    main()
