@@ -343,7 +343,7 @@ if __name__ == '__main__':
         
     # parameters for ADS-GAN and Wasserstein distance metrics
     params = dict()
-    params["lamda"] = 0.1
+    params["lambda"] = 0.1
     params["iterations"] = 10000
     params["h_dim"] = 30
     params["z_dim"] = 10
@@ -351,7 +351,7 @@ if __name__ == '__main__':
     params['gen_model_name'] = method
     
     if method != 'adsgan':
-        params['lamda'] = 0
+        params['lambda'] = 0
         
     train_ratio = 0.8
     
@@ -391,7 +391,7 @@ if __name__ == '__main__':
     print("Identifiability measure: " + str(identifiability))
     
     
-    # Some differentd data definitions
+    # Some different data definitions
     synth_data = pd.DataFrame(synth_data,columns = orig_data.columns)
     orig_train_index = round(len(orig_data)*train_ratio)
     orig_X, orig_Y = orig_data.drop(columns=['target']), orig_data.target
