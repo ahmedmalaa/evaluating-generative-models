@@ -34,6 +34,7 @@ from metrics.compute_identifiability import compute_identifiability
 #%% Data loading
 
 def load_breast_cancer_data():
+    # pylint: disable=no-member
     data = load_breast_cancer()
     X = MinMaxScaler().fit_transform(data.data)
     df = pd.DataFrame(X, columns=data.feature_names)
