@@ -24,6 +24,7 @@ import pickle
 
 #%% Import functions
 from adsgan import gan
+from pategan import pategan
 from vae import vae
 
 
@@ -329,8 +330,8 @@ if __name__ == '__main__':
     
     # Data loading
     dataset = 'covid'
-    method = 'adsgan' #adsgan, wgan, gan, vae
-    train = False
+    method = 'pategan' #adsgan, wgan, gan, vae, pategan
+    train = True
     
     #Save synthetic data iff we're training
     save_synth = train
@@ -367,6 +368,12 @@ if __name__ == '__main__':
     if train:
         if method in ['wgan','gan', 'adsgan']:
             synth_data = gan(orig_data, params)
+        elif method == 'pategan':
+            params_pate = {'n_s': 1, 'batch_size': 128, 
+                'k': 20, 'epsilon': 1, 'delta': 1e-5, 'lamda': 1}
+
+            synth_data = pategan(orig_data.to_numpy(), params_pate)
+            
         elif method=='vae':
             synth_data = vae(orig_data, params)
             
