@@ -23,9 +23,8 @@ import pickle
 
 
 #%% Import functions
-from adsgan import gan
-from pategan import pategan
-from vae import vae
+from generative_models.adsgan import adsgan
+from generative_models.vae import vae
 
 
 from metrics.feature_distribution import feature_distribution
@@ -35,6 +34,7 @@ from metrics.compute_identifiability import compute_identifiability
 #%% Data loading
 
 def load_breast_cancer_data():
+    # pylint: disable=no-member
     data = load_breast_cancer()
     X = MinMaxScaler().fit_transform(data.data)
     df = pd.DataFrame(X, columns=data.feature_names)
@@ -44,7 +44,7 @@ def load_breast_cancer_data():
     return df
 
 
-def load_covid_data(original_data_dir):
+def load_covid_data():
     df = pd.read_csv(f'{original_data_dir}/brazilian_covid_data.csv')
     df.rename(columns={'is_dead':'target'},inplace=True)
     # drop redundant columns that are contained in other columns
@@ -257,7 +257,7 @@ def bar_comparison(vectors, std=None, labels=None, tick_names=None, save_name = 
         else:
             ax.bar(xbar, vec[indices], width=width, label=labels[i])
 
-#df.set_index('a', inplace=True)
+    # df.set_index('a', inplace=True)
     ax.set_ylim(bottom=0)
     fig.tight_layout()
     ticks = np.array(tick_names, dtype='object')
@@ -323,28 +323,27 @@ def roc(X, y, classifier, n_splits=6, pos_label = 2):
 
 
 #%%  
+# Set settings:
+dataset = 'covid'
+method = 'adsgan' #adsgan, wgan, gan, vae
+do_train = False
+original_data_dir = 'data/original'
+synth_data_dir = 'data/synth'
+visual_dir = 'visualisations'
 
-if __name__ == '__main__':
+
+def main():
     plt.close('all')
     
-    
-    # Data loading
-    dataset = 'covid'
-    method = 'pategan' #adsgan, wgan, gan, vae, pategan
-    train = True
-    
     #Save synthetic data iff we're training
-    save_synth = train
+    save_synth = do_train
     
-    original_data_dir = 'data/original'
-    synth_data_dir = 'data/synth'
-    visual_dir = 'visualisations'
     filename =  f'{synth_data_dir}/{dataset}_{method}.csv'
     
         
     # parameters for ADS-GAN and Wasserstein distance metrics
     params = dict()
-    params["lamda"] = 0.1
+    params["lambda"] = 0.1
     params["iterations"] = 10000
     params["h_dim"] = 30
     params["z_dim"] = 10
@@ -352,7 +351,7 @@ if __name__ == '__main__':
     params['gen_model_name'] = method
     
     if method != 'adsgan':
-        params['lamda'] = 0
+        params['lambda'] = 0
         
     train_ratio = 0.8
     
@@ -360,20 +359,18 @@ if __name__ == '__main__':
     if dataset == 'bc':
         orig_data = load_breast_cancer_data()  
     elif dataset == 'covid':
-        orig_data = load_covid_data(original_data_dir)  
+        orig_data = load_covid_data()  
     
     
     
     # Synthetic data generation
-    if train:
+    if do_train:
         if method in ['wgan','gan', 'adsgan']:
-            synth_data = gan(orig_data, params)
+            synth_data = adsgan(orig_data, params)
         elif method == 'pategan':
             params_pate = {'n_s': 1, 'batch_size': 128, 
-                'k': 20, 'epsilon': 1, 'delta': 1e-5, 'lamda': 1}
-
-            synth_data = pategan(orig_data.to_numpy(), params_pate)
-            
+                'k': 20, 'epsilon': 1, 'delta': 1e-5, 'lambda': 1}
+            # synth_data = pategan(orig_data.to_numpy(), params_pate)  # TODO: Boris please put pate-gen with the rest of genrative_models and use an import statement as I described.
         elif method=='vae':
             synth_data = vae(orig_data, params)
             
@@ -398,7 +395,7 @@ if __name__ == '__main__':
     print("Identifiability measure: " + str(identifiability))
     
     
-    # Some differentd data definitions
+    # Some different data definitions
     synth_data = pd.DataFrame(synth_data,columns = orig_data.columns)
     orig_train_index = round(len(orig_data)*train_ratio)
     orig_X, orig_Y = orig_data.drop(columns=['target']), orig_data.target
@@ -427,8 +424,7 @@ if __name__ == '__main__':
     
     ### Feature importance between orig and synth data
     feature_importance_comparison(orig_X, orig_Y, synth_X, synth_Y)
-     
-    
 
-  
-  
+
+if __name__ == '__main__':
+    main()
