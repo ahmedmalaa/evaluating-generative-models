@@ -108,3 +108,4 @@ ENV/
 # Custom:
 .vscode/
 .pylintrc
+visualisations/
