@@ -71,7 +71,7 @@ def pategan(x_train, parameters):
   # delta
   delta = parameters['delta']
   # lamda
-  lamda = parameters['lamda']
+  lamda = parameters['lambda']
   
   # Other parameters
   # alpha initialize

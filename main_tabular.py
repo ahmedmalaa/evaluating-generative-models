@@ -24,7 +24,9 @@ import pickle
 
 #%% Import functions
 from generative_models.adsgan import adsgan
+from generative_models.pategan import pategan
 from generative_models.vae import vae
+
 
 
 from metrics.feature_distribution import feature_distribution
@@ -325,8 +327,8 @@ def roc(X, y, classifier, n_splits=6, pos_label = 2):
 #%%  
 # Set settings:
 dataset = 'covid'
-method = 'adsgan' #adsgan, wgan, gan, vae
-do_train = False
+method = 'pategan' #adsgan, wgan, gan, vae
+do_train = True
 original_data_dir = 'data/original'
 synth_data_dir = 'data/synth'
 visual_dir = 'visualisations'
@@ -370,7 +372,8 @@ def main():
         elif method == 'pategan':
             params_pate = {'n_s': 1, 'batch_size': 128, 
                 'k': 20, 'epsilon': 1, 'delta': 1e-5, 'lambda': 1}
-            # synth_data = pategan(orig_data.to_numpy(), params_pate)  # TODO: Boris please put pate-gen with the rest of genrative_models and use an import statement as I described.
+            synth_data = pategan(orig_data.to_numpy(), params_pate)  
+            # TODO: Boris please put pate-gen with the rest of genrative_models and use an import statement as I described.
         elif method=='vae':
             synth_data = vae(orig_data, params)
             
