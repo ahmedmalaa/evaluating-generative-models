@@ -4,18 +4,18 @@
 import tensorflow as tf
 import numpy as np
 import warnings
-warnings.filterwarnings("ignore")
+#warnings.filterwarnings("ignore")
 
 from sklearn.linear_model import LogisticRegression
 
 
-def pate_lamda (x, teacher_models, lamda):
+def pate_lambda (x, teacher_models, lambda_):
     '''Returns PATE_lambda(x).
     
     Args:
         - x: feature vector
         - teacher_models: a list of teacher models
-        - lamda: parameter
+        - lambda_: parameter
         
     Returns:
         - n0, n1: the number of label 0 and 1, respectively
@@ -32,7 +32,7 @@ def pate_lamda (x, teacher_models, lamda):
     n0 = sum(y_hat == 0)
     n1 = sum(y_hat == 1)
     
-    lap_noise = np.random.laplace(loc=0.0, scale=lamda)
+    lap_noise = np.random.laplace(loc=0.0, scale=lambda_)
     
     out = (n1+lap_noise) / float(n0+n1)
     out = int(out>0.5)
@@ -50,7 +50,7 @@ def pategan(x_train, parameters):
             - batch_size: the number of batch size for training student and generator
             - k: the number of teachers
             - epsilon, delta: Differential privacy parameters
-            - lamda: noise size
+            - lambda_: noise size
             
     Returns:
         - x_train_hat: generated training data by differentially private generator
@@ -70,8 +70,8 @@ def pategan(x_train, parameters):
     epsilon = parameters['epsilon']
     # delta
     delta = parameters['delta']
-    # lamda
-    lamda = parameters['lambda']
+    # lambda_
+    lambda_ = parameters['lambda']
     
     # Other parameters
     # alpha initialize
@@ -208,19 +208,19 @@ def pategan(x_train, parameters):
             Y_mb = list()
                         
             for j in range(batch_size):                                
-                n0, n1, r_j = pate_lamda(G_mb[j, :], teacher_models, lamda)
+                n0, n1, r_j = pate_lambda(G_mb[j, :], teacher_models, lambda_)
                 Y_mb = Y_mb + [r_j]
              
                 # Update moments accountant
-                q = np.log(2 + lamda * abs(n0 - n1)) - np.log(4.0) - \
-                        (lamda * abs(n0 - n1))
+                q = np.log(2 + lambda_ * abs(n0 - n1)) - np.log(4.0) - \
+                        (lambda_ * abs(n0 - n1))
                 q = np.exp(q)
                                 
                 # Compute alpha
                 for l in range(L):
-                    temp1 = 2 * (lamda**2) * (l+1) * (l+2)
-                    temp2 = (1-q) * ( ((1-q)/(1-q*np.exp(2*lamda)))**(l+1) ) + \
-                                    q * np.exp(2*lamda * (l+1))
+                    temp1 = 2 * (lambda_**2) * (l+1) * (l+2)
+                    temp2 = (1-q) * ( ((1-q)/(1-q*np.exp(2*lambda_)))**(l+1) ) + \
+                                    q * np.exp(2*lambda_ * (l+1))
                     alpha[l] = alpha[l] + np.min([temp1, np.log(temp2)])
                 
             # PATE labels for G_mb    
@@ -233,6 +233,8 @@ def pategan(x_train, parameters):
         # Generator Update                
         Z_mb = sample_Z(batch_size, z_dim)
         _, G_loss_curr = sess.run([G_solver, G_loss], feed_dict = {Z: Z_mb})
+        print('G loss',G_loss_curr)
+        print('D_loss', D_loss_curr)
         print(np.mean(Y_mb))
                 
         # epsilon_hat computation
@@ -266,6 +268,6 @@ if __name__ == '__main__':
     
     
     parameters = {'n_s': 1, 'batch_size': 1000, 
-                                'k': 100, 'epsilon': 100, 'delta': 0.0001, 'lamda': 1}
+                                'k': 100, 'epsilon': 100, 'delta': 0.0001, 'lambda': 1}
 
     x_train_new = pategan(x_train, parameters)
