@@ -110,3 +110,4 @@ ENV/
 .pylintrc
 visualisations/
 data/mnist/
+data
