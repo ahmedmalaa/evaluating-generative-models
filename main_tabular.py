@@ -32,6 +32,8 @@ from generative_models.vae import vae
 from metrics.feature_distribution import feature_distribution
 from metrics.compute_wd import compute_wd
 from metrics.compute_identifiability import compute_identifiability
+from metrics.fid import compute_frechet_distance
+
 
 #%% Data loading
 
@@ -233,7 +235,13 @@ def predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y, models=None):
                    [std_aucs, std_synth_aucs, std_transf_aucs], 
                    tick_names=model_names, save_name = 'pred_aucs')
        
+
+
     
+    
+
+    
+
 #%% Misc
     
 def bar_comparison(vectors, std=None, labels=None, tick_names=None, save_name = None):
@@ -326,13 +334,13 @@ def roc(X, y, classifier, n_splits=6, pos_label = 2):
 
 #%%  
 # Set settings:
-dataset = 'covid'
-method = 'pategan' #adsgan, wgan, gan, vae
-do_train = True
-original_data_dir = 'data/original'
-synth_data_dir = 'data/synth'
+dataset = 'bc'
+method = 'gan' #adsgan, wgan, gan, vae
+do_train = False
+original_data_dir = 'data/tabular/original'
+synth_data_dir = 'data/tabular/synth'
 visual_dir = 'visualisations'
-
+debug_train = False
 
 def main():
     plt.close('all')
@@ -363,6 +371,10 @@ def main():
     elif dataset == 'covid':
         orig_data = load_covid_data()  
     
+    orig_train_index = round(len(orig_data)*train_ratio)
+    orig_X, orig_Y = orig_data.drop(columns=['target']), orig_data.target
+    orig_X_train, orig_X_test = orig_X[:orig_train_index], orig_X[orig_train_index:]
+    orig_Y_train, orig_Y_test = orig_Y[:orig_train_index], orig_Y[orig_train_index:]
     
     
     # Synthetic data generation
@@ -371,9 +383,10 @@ def main():
             synth_data = adsgan(orig_data, params)
         elif method == 'pategan':
             params_pate = {'n_s': 1, 'batch_size': 128, 
-                'k': 20, 'epsilon': 1, 'delta': 1e-5, 'lambda': 1}
+                 'k': 100, 'epsilon': 100, 'delta': 0.0001, 'lambda': 1}
+            
+        
             synth_data = pategan(orig_data.to_numpy(), params_pate)  
-            # TODO: Boris please put pate-gen with the rest of genrative_models and use an import statement as I described.
         elif method=='vae':
             synth_data = vae(orig_data, params)
             
@@ -383,6 +396,8 @@ def main():
     else:
         synth_data, params = pickle.load(open(filename,'rb'))
     
+    if debug_train:
+        return synth_data
     ## Performance measures from ADS-GAN paper
     # (1) Feature marginal distributions
     feat_dist = feature_distribution(orig_data, synth_data)
@@ -393,17 +408,18 @@ def main():
     wd_measure = compute_wd(orig_data, synth_data, params)
     print("WD measure: " + str(wd_measure))
     
+    frechet_distance = compute_frechet_distance(orig_data, synth_data)
+    print("Frechet distance: " + str(frechet_distance))
+    
     # (3) Identifiability 
     identifiability = compute_identifiability(orig_data, synth_data)
     print("Identifiability measure: " + str(identifiability))
     
     
+    
+    
     # Some different data definitions
     synth_data = pd.DataFrame(synth_data,columns = orig_data.columns)
-    orig_train_index = round(len(orig_data)*train_ratio)
-    orig_X, orig_Y = orig_data.drop(columns=['target']), orig_data.target
-    orig_X_train, orig_X_test = orig_X[:orig_train_index], orig_X[orig_train_index:]
-    orig_Y_train, orig_Y_test = orig_Y[:orig_train_index], orig_Y[orig_train_index:]
     
     synth_train_index = round(len(synth_data)*train_ratio)
     synth_X, synth_Y = synth_data.drop(columns=['target']), synth_data.target
@@ -427,7 +443,10 @@ def main():
     
     ### Feature importance between orig and synth data
     feature_importance_comparison(orig_X, orig_Y, synth_X, synth_Y)
+    
+    return orig_data, synth_data
 
 
 if __name__ == '__main__':
-    main()
+    pass
+    #orig_data, synth_data = main()
