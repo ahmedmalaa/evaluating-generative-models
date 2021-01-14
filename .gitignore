@@ -109,3 +109,4 @@ ENV/
 .vscode/
 .pylintrc
 visualisations/
+data/mnist/
