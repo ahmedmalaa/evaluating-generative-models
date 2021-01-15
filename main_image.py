@@ -17,9 +17,11 @@ from keras.models import Model
 import numpy as np
 
 from metrics.feature_distribution import feature_distribution
-from metrics.compute_wd import compute_wd
+from metrics.compute_wd_v2 import compute_wd
 from metrics.compute_identifiability import compute_identifiability
 from metrics.fid import calculate_frechet_distance, fit_gaussian
+
+from PIL import Image
 
 
 #%%
@@ -71,7 +73,9 @@ def load_embedder(embedding):
         if embedding['dim64']:
             # removes last layer and inserts 64 output
             model = remove_layer(model)
-            model.add(tf.keras.layers.Dense(64))
+            new_input = model.input
+            hidden_layer = tf.keras.layers.Dense(64)(model.layers[-2].output)
+            model = Model(new_input, hidden_layer)   
     
     return model
 
@@ -99,14 +103,13 @@ def load_all_images(files):
     Params:
     -- files    : list of paths to image files. Images need to have same dimensions for all files.
     Returns:
-    -- A numpy array of dimensions (num_images,hi, wi, 3) representing the image pixel values.
+    -- A numpy array of dimensions (num_images,hi*wi)
     """
-    
-    images = np.zeros((len(files),28,28))
+    images = np.zeros((len(files),28**2))
     for i in range(len(files)):
-        image = load_img(files[i], target_size=(28,28))
+        image = np.array(Image.open(files[i])).reshape(1,-1)
         images[i] = image
-    
+    images = preprocess_input(images)
     return images
 
 
@@ -136,7 +139,7 @@ def get_activations_from_files(files, embedder, batch_size=None, verbose=False):
         batch_size = n_imgs
     n_batches = n_imgs//batch_size + 1
     
-    #if embedder != flatten_identity:
+
     pred_arr = np.empty((n_imgs,embedder.output.shape[-1]))
     input_shape = embedder.input.shape[1]
     
@@ -149,7 +152,7 @@ def get_activations_from_files(files, embedder, batch_size=None, verbose=False):
         else:
             end = n_imgs
         
-        #if embedder != flatten_identity:
+ 
         batch = load_image_batch(files[start:end], input_shape)
         
         pred = embedder(batch)
@@ -166,7 +169,7 @@ def get_activations_from_files(files, embedder, batch_size=None, verbose=False):
 
 #%% main
 
-def main(paths, embedding, load_act=True, save_act=False, verbose = False):
+def main(paths, embedding, load_act=True, save_act=True, verbose = False):
     ''' Calculates the FID of two paths. '''
     
     print('#### Embedding info',embedding, '#####')
@@ -174,56 +177,78 @@ def main(paths, embedding, load_act=True, save_act=False, verbose = False):
     m = []
     s = []
     fid_values = {}
-    embedder = load_embedder(embedding)
+    # Load embedder function
+    if embedding is not None:
+        embedder = load_embedder(embedding)
     
+    # Loop through datasets
     for path_index, path in enumerate(paths):
         print('============ Path', path, '============')
+        # Check if folder exists
         if not os.path.exists(path):
             raise RuntimeError("Invalid path: %s" % path)
-        
-        act_filename = f'{path}/act_{embedding["model"]}_{embedding["dim64"]}_{embedding["randomise"]}'
-        if load_act and os.path.exists(f'{act_filename}.npz'):
-            print('Loaded activations from', act_filename)
-            data = np.load(f'{act_filename}.npz',allow_pickle=True)
-            act, embedding_info = data['act'], data['embedding']
-            
-        else:
-            if load_act:
-                print('Could not find activation file', act_filename)
-            print('Calculating activations')
+        # Don't embed data if no embedding is given 
+        if embedding is None:
             files = list(glob.glob(os.path.join(path,'**/*.jpg'),recursive=True)) + list(glob.glob(os.path.join(path,'**/*.png'),recursive=True)) 
-            act = get_activations_from_files(files, embedder, batch_size=64*8, verbose=verbose)
-            if save_act:
-                np.savez(f'{act_filename}', act=act,embedding=embedding)
-
-        activations.append(act)            
+            act = load_all_images(files)    
+    
+        else:
+            act_filename = f'{path}/act_{embedding["model"]}_{embedding["dim64"]}_{embedding["randomise"]}'
+            # Check if embeddings are already available
+            if load_act and os.path.exists(f'{act_filename}.npz'):
+                print('Loaded activations from', act_filename)
+                data = np.load(f'{act_filename}.npz',allow_pickle=True)
+                act, _ = data['act'], data['embedding']
+            # Otherwise compute embeddings
+            else:
+                if load_act:
+                    print('Could not find activation file', act_filename)
+                print('Calculating activations')
+                files = list(glob.glob(os.path.join(path,'**/*.jpg'),recursive=True)) + list(glob.glob(os.path.join(path,'**/*.png'),recursive=True)) 
+                act = get_activations_from_files(files, embedder, batch_size=64*8, verbose=verbose)
+                
+                # Save embeddings
+                if save_act:
+                    np.savez(f'{act_filename}', act=act,embedding=embedding)
+                    
         
+        activations.append(act)            
     
         
-        # Frechet distance
+        # Frechet distance statistics
         m_i, s_i = fit_gaussian(act)
         m.append(m_i)
         s.append(s_i)
         
         if path_index!=0:
-            # (0) Frechet
+            # (0) Frechet distance
             fid_value = calculate_frechet_distance(m[0],s[0],m[path_index],s[path_index])
             fid_values[path_index] = fid_value
             print('Frechet distance', fid_value)
+            print('Frechet distance/dim', fid_value/act.shape[-1])
             
             # (1) Marginal distributions
-            # feat_dist = feature_distribution(activations[0], act)
-            # print("Finish computing feature distributions")
+            #print("Start computing marginal feature distributions")
+            #feat_dist = feature_distribution(activations[0], act)
+            #print("Finish computing feature distributions")
+            #print(feat_dist)
             
             # (2) Wasserstein Distance (WD)
-            # print("Start computing Wasserstein Distance")
-            # wd_measure = compute_wd(activations[0], act, params)
-            # print("WD measure: " + str(wd_measure))
+            print("Start computing Wasserstein Distance")
+            params = dict()
+            params["iterations"] = 10000
+            params["h_dim"] = 30
+            params["z_dim"] = 10
+            params["mb_size"] = 128
+            
+            wd_measure = compute_wd(activations[0], act, params)
+            print("WD measure: " + str(wd_measure))
             
             
             # (3) Identifiability 
-            # identifiability = compute_identifiability(activations[0], act)
-            # print("Identifiability measure: " + str(identifiability))
+            print("Start computing identifiability")
+            identifiability = compute_identifiability(activations[0], act)
+            print("Identifiability measure: " + str(identifiability))
         
     return activations, fid_values
 
@@ -234,21 +259,20 @@ if __name__ == '__main__':
     os.environ['CUDA_VISIBLE_DEVICES'] = '0'
     
     #for embed in ['inceptionv3','vgg','identity']:
-    methods = ['DCGAN','WGAN-GP','VAE','CGAN', 'ADS-GAN']
+    methods = ['WGAN-GP','DCGAN','VAE','CGAN', 'ADS-GAN']
     load_act = True
     save_act = True
     nul_path = ['data/mnist/original/testing']
     other_paths = [f'data/mnist/synth/{method}' for method in methods]
     paths = nul_path + other_paths
     embeddings = []
-    #embeddings.append({'model':'inceptionv3',
-    #             'randomise': False, 'dim64': False})
+#    embeddings.append(None)
+    embeddings.append({'model':'inceptionv3',
+                 'randomise': False, 'dim64': False})
     embeddings.append({'model':'vgg16',
                  'randomise': False, 'dim64': False})
     embeddings.append({'model':'vgg16',
                  'randomise': True, 'dim64': False})
-    embeddings.append({'model':'vgg16',
-                 'randomise': True, 'dim64': True})
     embeddings.append({'model':'vgg16',
                  'randomise': True, 'dim64': True})
     
