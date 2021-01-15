@@ -6,6 +6,8 @@ import numpy as np
 import warnings
 #warnings.filterwarnings("ignore")
 
+tf.compat.v1.disable_eager_execution()
+
 from sklearn.linear_model import LogisticRegression
 
 
@@ -57,7 +59,7 @@ def pategan(x_train, parameters):
     '''
     
     # Reset the graph
-    tf.reset_default_graph()
+    tf.compat.v1.reset_default_graph()
         
     # PATE-GAN parameters
     # number of student training iterations
@@ -105,7 +107,7 @@ def pategan(x_train, parameters):
     def xavier_init(size):
         in_dim = size[0]
         xavier_stddev = 1. / tf.sqrt(in_dim / 2.)
-        return tf.random_normal(shape = size, stddev = xavier_stddev)        
+        return tf.random.normal(shape = size, stddev = xavier_stddev)        
                 
     # Sample from uniform distribution
     def sample_Z(m, n):
@@ -113,9 +115,9 @@ def pategan(x_train, parameters):
          
     ## Placeholder
     # PATE labels
-    Y = tf.placeholder(tf.float32, shape = [None, 1])    
+    Y = tf.compat.v1.placeholder(tf.float32, shape = [None, 1])    
     # Random Variable        
-    Z = tf.placeholder(tf.float32, shape = [None, z_dim])
+    Z = tf.compat.v1.placeholder(tf.float32, shape = [None, z_dim])
      
     ## NN variables     
     # Student
@@ -158,20 +160,20 @@ def pategan(x_train, parameters):
     G_sample = generator(Z)
     S_fake = student(G_sample)
     
-    S_loss = tf.reduce_mean(Y * S_fake) - tf.reduce_mean((1-Y) * S_fake)
-    G_loss = -tf.reduce_mean(S_fake)
+    S_loss = tf.reduce_mean(input_tensor=Y * S_fake) - tf.reduce_mean(input_tensor=(1-Y) * S_fake)
+    G_loss = -tf.reduce_mean(input_tensor=S_fake)
     
     # Optimizer
-    S_solver = (tf.train.RMSPropOptimizer(learning_rate=1e-4)
+    S_solver = (tf.compat.v1.train.RMSPropOptimizer(learning_rate=1e-4)
                             .minimize(-S_loss, var_list=theta_S))
-    G_solver = (tf.train.RMSPropOptimizer(learning_rate=1e-4)
+    G_solver = (tf.compat.v1.train.RMSPropOptimizer(learning_rate=1e-4)
                             .minimize(G_loss, var_list=theta_G))
     
     clip_S = [p.assign(tf.clip_by_value(p, -0.01, 0.01)) for p in theta_S]
     
     ## Sessions
-    sess = tf.Session()
-    sess.run(tf.global_variables_initializer())
+    sess = tf.compat.v1.Session()
+    sess.run(tf.compat.v1.global_variables_initializer())
     
 
     min_iterations = 1

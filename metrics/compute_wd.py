@@ -8,6 +8,8 @@ IEEE Journal of Biomedical and Health Informatics (JBHI), 2019.
 Paper link: https://ieeexplore.ieee.org/document/9034117
 Last updated Date: December 22th 2020
 Code author: Jinsung Yoon (jsyoon0823@gmail.com)
+Updated by:  Boris van Breugel (bv292@cam.ac.uk)
+
 -----------------------------
 compute_wd.py
 - Compare Wasserstein distance between original data and synthetic data
@@ -16,6 +18,8 @@ compute_wd.py
 import numpy as np
 import tensorflow as tf
 from tqdm import tqdm
+
+tf.compat.v1.disable_eager_execution()
 
 def compute_wd (orig_data, synth_data, params):
     """Compare Wasserstein distance between original data and synthetic data.
@@ -59,15 +63,15 @@ def compute_wd (orig_data, synth_data, params):
     def xavier_init(size):
         in_dim = size[0]
         xavier_stddev = 1. / tf.sqrt(in_dim / 2.)
-        return tf.random_normal(shape = size, stddev = xavier_stddev)     
+        return tf.random.normal(shape = size, stddev = xavier_stddev)     
                 
     # Sample from the real data
     def sample_X(m, n):
         return np.random.permutation(m)[:n]    
          
     #%% Placeholder
-    X = tf.placeholder(tf.float32, shape = [None, x_dim])     
-    X_hat = tf.placeholder(tf.float32, shape = [None, x_dim])    
+    X = tf.compat.v1.placeholder(tf.float32, shape = [None, x_dim])     
+    X_hat = tf.compat.v1.placeholder(tf.float32, shape = [None, x_dim])    
             
     #%% Discriminator
     # Discriminator
@@ -88,16 +92,16 @@ def compute_wd (orig_data, synth_data, params):
     D_real = discriminator(X)
     D_fake = discriminator(X_hat) 
         
-    D_loss = tf.reduce_mean(D_real) - tf.reduce_mean(D_fake)
+    D_loss = tf.reduce_mean(input_tensor=D_real) - tf.reduce_mean(input_tensor=D_fake)
         
-    D_solver = (tf.train.RMSPropOptimizer(learning_rate=1e-4)
+    D_solver = (tf.compat.v1.train.RMSPropOptimizer(learning_rate=1e-4)
                             .minimize(-D_loss, var_list=theta_D))
         
     clip_D = [p.assign(tf.clip_by_value(p, -0.1, 0.1)) for p in theta_D]
                         
     #%%
-    sess = tf.Session()
-    sess.run(tf.global_variables_initializer())
+    sess = tf.compat.v1.Session()
+    sess.run(tf.compat.v1.global_variables_initializer())
                 
     # Iterations
     for it in tqdm(range(iterations)):                                

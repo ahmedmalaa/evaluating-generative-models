@@ -22,15 +22,16 @@ import numpy as np
 import pickle
 
 
+
 #%% Import functions
-from generative_models.adsgan import adsgan
-from generative_models.pategan import pategan
-from generative_models.vae import vae
+from generative_models.adsgan.adsgan_v2 import adsgan
+from generative_models.pategan.pategan_v2 import pategan
+from generative_models.vae.vae_v2 import vae
 
 
 
 from metrics.feature_distribution import feature_distribution
-from metrics.compute_wd import compute_wd
+from metrics.compute_wd_v2 import compute_wd
 from metrics.compute_identifiability import compute_identifiability
 from metrics.fid import compute_frechet_distance
 
@@ -334,9 +335,9 @@ def roc(X, y, classifier, n_splits=6, pos_label = 2):
 
 #%%  
 # Set settings:
-dataset = 'bc'
-method = 'gan' #adsgan, wgan, gan, vae
-do_train = False
+dataset = 'covid'
+method = 'adsgan' #adsgan, wgan, gan, vae
+do_train = True
 original_data_dir = 'data/tabular/original'
 synth_data_dir = 'data/tabular/synth'
 visual_dir = 'visualisations'
@@ -448,5 +449,4 @@ def main():
 
 
 if __name__ == '__main__':
-    pass
-    #orig_data, synth_data = main()
+    orig_data, synth_data = main()

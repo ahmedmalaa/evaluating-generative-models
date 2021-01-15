@@ -20,6 +20,7 @@ import numpy as np
 
 from tqdm import tqdm
 
+tf.compat.v1.disable_eager_execution()
 
 def adsgan(orig_data, params):
     """Generate synthetic data for ADSGAN framework.
@@ -38,7 +39,7 @@ def adsgan(orig_data, params):
     """
         
     # Reset the tensorflow graph
-    tf.reset_default_graph()
+    tf.compat.v1.reset_default_graph()
     
     ## Parameters        
     # Feature no
@@ -93,7 +94,7 @@ def adsgan(orig_data, params):
     def xavier_init(size):
         in_dim = size[0]
         xavier_stddev = 1. / tf.sqrt(in_dim / 2.)
-        return tf.random_normal(shape = size, stddev = xavier_stddev)        
+        return tf.random.normal(shape = size, stddev = xavier_stddev)        
                 
     # Sample from uniform distribution
     def sample_Z(m, n):
@@ -105,9 +106,9 @@ def adsgan(orig_data, params):
          
     #%% Placeholder
     # Feature
-    X = tf.placeholder(tf.float32, shape = [None, x_dim])     
+    X = tf.compat.v1.placeholder(tf.float32, shape = [None, x_dim])     
     # Random Variable        
-    Z = tf.placeholder(tf.float32, shape = [None, z_dim])
+    Z = tf.compat.v1.placeholder(tf.float32, shape = [None, z_dim])
             
     #%% Discriminator
     # Discriminator
@@ -163,34 +164,34 @@ def adsgan(orig_data, params):
             
         # Replacement of Clipping algorithm to Penalty term
         # 1. Line 6 in Algorithm 1
-        eps = tf.random_uniform([mb_size, 1], minval = 0., maxval = 1.)
+        eps = tf.random.uniform([mb_size, 1], minval = 0., maxval = 1.)
         X_inter = eps*X + (1. - eps) * G_sample
     
         # 2. Line 7 in Algorithm 1
-        grad = tf.gradients(discriminator(X_inter), [X_inter])[0]
-        grad_norm = tf.sqrt(tf.reduce_sum((grad)**2 + 1e-8, axis = 1))
-        grad_pen = lam * tf.reduce_mean((grad_norm - 1)**2)
+        grad = tf.gradients(ys=discriminator(X_inter), xs=[X_inter])[0]
+        grad_norm = tf.sqrt(tf.reduce_sum(input_tensor=(grad)**2 + 1e-8, axis = 1))
+        grad_pen = lam * tf.reduce_mean(input_tensor=(grad_norm - 1)**2)
     
         # Loss function
-        D_loss = tf.reduce_mean(D_fake) - tf.reduce_mean(D_real) + grad_pen
+        D_loss = tf.reduce_mean(input_tensor=D_fake) - tf.reduce_mean(input_tensor=D_real) + grad_pen
     
     
     
     elif gen_model_name == 'gan':
-        D_loss = tf.reduce_mean(D_fake) - tf.reduce_mean(D_real)
+        D_loss = tf.reduce_mean(input_tensor=D_fake) - tf.reduce_mean(input_tensor=D_real)
     
-    G_loss1 = -tf.sqrt(tf.reduce_mean(tf.square(X - G_sample)))
-    G_loss2 = -tf.reduce_mean(D_fake)
+    G_loss1 = -tf.sqrt(tf.reduce_mean(input_tensor=tf.square(X - G_sample)))
+    G_loss2 = -tf.reduce_mean(input_tensor=D_fake)
     
     G_loss = G_loss2 + lambda_ * G_loss1
     
     # Solver
-    D_solver = (tf.train.AdamOptimizer(learning_rate = lr, beta1 = 0.5).minimize(D_loss, var_list = theta_D))
-    G_solver = (tf.train.AdamOptimizer(learning_rate = lr, beta1 = 0.5).minimize(G_loss, var_list = theta_G))
+    D_solver = (tf.compat.v1.train.AdamOptimizer(learning_rate = lr, beta1 = 0.5).minimize(D_loss, var_list = theta_D))
+    G_solver = (tf.compat.v1.train.AdamOptimizer(learning_rate = lr, beta1 = 0.5).minimize(G_loss, var_list = theta_G))
                         
     #%% Iterations
-    sess = tf.Session()
-    sess.run(tf.global_variables_initializer())
+    sess = tf.compat.v1.Session()
+    sess.run(tf.compat.v1.global_variables_initializer())
                 
     # Iterations
     for it in tqdm(range(iterations)):
