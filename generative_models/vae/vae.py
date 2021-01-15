@@ -33,7 +33,7 @@ def vae(orig_data, params):
     """
             
     # Reset the tensorflow graph
-    tf.reset_default_graph()
+    tf.compat.v1.reset_default_graph()
     
     ## Parameters                
     # Feature no
@@ -85,7 +85,7 @@ def vae(orig_data, params):
     def xavier_init(size):
         in_dim = size[0]
         xavier_stddev = 1. / tf.sqrt(in_dim / 2.)
-        return tf.random_normal(shape = size, stddev = xavier_stddev)                
+        return tf.random.normal(shape = size, stddev = xavier_stddev)                
                             
     # X_recon from uniform distribution
     def X_recon_Z(m, n):
@@ -97,12 +97,12 @@ def vae(orig_data, params):
              
     #%% Placeholder
     # Feature
-    X = tf.placeholder(tf.float32, shape = [None, x_dim])         
-    X_recon = tf.placeholder(tf.float32, shape = [None, x_dim])         
+    X = tf.compat.v1.placeholder(tf.float32, shape = [None, x_dim])         
+    X_recon = tf.compat.v1.placeholder(tf.float32, shape = [None, x_dim])         
     # Random Variable                
-    Z = tf.placeholder(tf.float32, shape = [None, z_dim])
-    mu = tf.placeholder(tf.float32, shape = [None, z_dim])
-    logvar = tf.placeholder(tf.float32, shape = [None, z_dim])
+    Z = tf.compat.v1.placeholder(tf.float32, shape = [None, z_dim])
+    mu = tf.compat.v1.placeholder(tf.float32, shape = [None, z_dim])
+    logvar = tf.compat.v1.placeholder(tf.float32, shape = [None, z_dim])
     
     
     #%% Encoder
@@ -155,24 +155,24 @@ def vae(orig_data, params):
         
     #%% Structure
     mu, logvar = encoder(X)
-    Z = mu + tf.exp(logvar/2) * tf.random_normal(tf.shape(mu), 0, 1, dtype=tf.float32)
+    Z = mu + tf.exp(logvar/2) * tf.random.normal(tf.shape(input=mu), 0, 1, dtype=tf.float32)
     
     X_recon = decoder(Z)
     
     
     
     
-    loss1 = tf.reduce_mean(tf.square(X_recon-X))
-    loss2 = 0.5 * tf.reduce_mean(tf.square(mu) + tf.exp(logvar) - logvar - 1, 1)
+    loss1 = tf.reduce_mean(input_tensor=tf.square(X_recon-X))
+    loss2 = 0.5 * tf.reduce_mean(input_tensor=tf.square(mu) + tf.exp(logvar) - logvar - 1, axis=1)
     
     loss = loss1 + loss2
     # Solver
     
-    solver = (tf.train.AdamOptimizer(learning_rate = lr, beta1 = 0.5).minimize(loss, var_list = theta))
+    solver = (tf.compat.v1.train.AdamOptimizer(learning_rate = lr, beta1 = 0.5).minimize(loss, var_list = theta))
                                             
     #%% Iterations
-    sess = tf.Session()
-    sess.run(tf.global_variables_initializer())
+    sess = tf.compat.v1.Session()
+    sess.run(tf.compat.v1.global_variables_initializer())
                             
     # Iterations
     for it in tqdm(range(iterations)):
