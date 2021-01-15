@@ -91,7 +91,7 @@ def calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
 
     # numerical error might give slight imaginary component
     if np.iscomplexobj(covmean):
-        if not np.allclose(np.diagonal(covmean).imag, 0, atol=1e-3):
+        if not np.allclose(np.diagonal(covmean).imag, 0, atol=2e-3):
             m = np.max(np.abs(covmean.imag))
             raise ValueError("Imaginary component {}".format(m))
         covmean = covmean.real
