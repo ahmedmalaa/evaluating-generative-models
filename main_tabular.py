@@ -30,10 +30,7 @@ from generative_models.vae import vae
 
 
 
-from metrics.feature_distribution import feature_distribution
-from metrics.compute_wd import compute_wd
-from metrics.compute_identifiability import compute_identifiability
-from metrics.fid import compute_frechet_distance
+from metrics.combined import compute_metrics
 
 
 #%% Data loading
@@ -180,7 +177,7 @@ def predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y, models=None):
     if models is None:
         models = [LogisticRegression(), 
               KNeighborsClassifier(), 
-              MLPClassifier(max_iter=1000),
+              MLPClassifier(max_iter=200),
               RandomForestClassifier()]
         model_names = ['LogReg', 'KNeighbour', 'MLP', 'RandForest']
     num_models = len(models)
@@ -337,7 +334,7 @@ def roc(X, y, classifier, n_splits=6, pos_label = 2):
 # Set settings:
 dataset = 'covid'
 method = 'vae' #adsgan, wgan, gan, vae
-do_train = True
+do_train = False
 original_data_dir = 'data/tabular/original'
 synth_data_dir = 'data/tabular/synth'
 visual_dir = 'visualisations'
@@ -372,12 +369,7 @@ def main():
     elif dataset == 'covid':
         orig_data = load_covid_data()  
     
-    orig_train_index = round(len(orig_data)*train_ratio)
-    orig_X, orig_Y = orig_data.drop(columns=['target']), orig_data.target
-    orig_X_train, orig_X_test = orig_X[:orig_train_index], orig_X[orig_train_index:]
-    orig_Y_train, orig_Y_test = orig_Y[:orig_train_index], orig_Y[orig_train_index:]
-    
-    
+
     # Synthetic data generation
     if do_train:
         if method in ['wgan','gan', 'adsgan']:
@@ -399,34 +391,23 @@ def main():
     
     if debug_train:
         return synth_data
-    ## Performance measures from ADS-GAN paper
-    # (1) Feature marginal distributions
-    feat_dist = feature_distribution(orig_data, synth_data)
-    print("Finish computing feature distributions")
     
-    # (2) Wasserstein Distance (WD)
-    print("Start computing Wasserstein Distance")
-    wd_measure = compute_wd(orig_data, synth_data, params)
-    print("WD measure: " + str(wd_measure))
+    ## Performance measures from ADS-GAN paper, FID and Parzen
+    results_metrics = compute_metrics(orig_data, synth_data, wd_params = params)
     
-    frechet_distance = compute_frechet_distance(orig_data, synth_data)
-    print("Frechet distance: " + str(frechet_distance))
-    
-    # (3) Identifiability 
-    identifiability = compute_identifiability(orig_data, synth_data)
-    print("Identifiability measure: " + str(identifiability))
-    
-    
-    
-    
-    # Some different data definitions
     synth_data = pd.DataFrame(synth_data,columns = orig_data.columns)
-    
+
+
+    # Some different data definitions
+    orig_train_index = round(len(orig_data)*train_ratio)
+    orig_X, orig_Y = orig_data.drop(columns=['target']), orig_data.target
+    # orig_X_train, orig_X_test = orig_X[:orig_train_index], orig_X[orig_train_index:]
+    # orig_Y_train, orig_Y_test = orig_Y[:orig_train_index], orig_Y[orig_train_index:]
+      
     synth_train_index = round(len(synth_data)*train_ratio)
     synth_X, synth_Y = synth_data.drop(columns=['target']), synth_data.target
-    synth_X_train, synth_X_test = synth_X[:synth_train_index], synth_X[synth_train_index:]
-    synth_Y_train, synth_Y_test = synth_Y[:synth_train_index], synth_Y[synth_train_index:]
-    
+    # synth_X_train, synth_X_test = synth_X[:synth_train_index], synth_X[synth_train_index:]
+    # synth_Y_train, synth_Y_test = synth_Y[:synth_train_index], synth_Y[synth_train_index:]
     
     
     ### predictive performance
@@ -435,8 +416,7 @@ def main():
     # how ranking (accuracy and AUC) of different models compares
     # between the synthetic and original dataset
     plt.close('all')
-    predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y)
-    
+    #predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y)
     
     # example of ROC computation
     #roc(synth_X, synth_Y, LogisticRegression())

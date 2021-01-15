@@ -14,7 +14,7 @@ Modified by Boris van Breugel (bv292@cam.ac.uk)
 import numpy as np
 import theano.tensor as T
 import theano
-import tqdm
+from tqdm import tqdm
 
 
 def get_nll(x, parzen, batch_size=10):

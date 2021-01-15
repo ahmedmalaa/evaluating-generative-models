@@ -16,10 +16,8 @@ from keras.models import Model
 
 import numpy as np
 
-from metrics.feature_distribution import feature_distribution
-from metrics.compute_wd_v2 import compute_wd
-from metrics.compute_identifiability import compute_identifiability
-from metrics.fid import calculate_frechet_distance, fit_gaussian
+from metrics.combined import compute_metrics
+
 
 from PIL import Image
 
@@ -174,9 +172,7 @@ def main(paths, embedding, load_act=True, save_act=True, verbose = False):
     
     print('#### Embedding info',embedding, '#####')
     activations = []
-    m = []
-    s = []
-    fid_values = {}
+    results = []
     # Load embedder function
     if embedding is not None:
         embedder = load_embedder(embedding)
@@ -211,46 +207,13 @@ def main(paths, embedding, load_act=True, save_act=True, verbose = False):
                 if save_act:
                     np.savez(f'{act_filename}', act=act,embedding=embedding)
                     
-        
         activations.append(act)            
-    
         
         # Frechet distance statistics
-        m_i, s_i = fit_gaussian(act)
-        m.append(m_i)
-        s.append(s_i)
-        
         if path_index!=0:
-            # (0) Frechet distance
-            fid_value = calculate_frechet_distance(m[0],s[0],m[path_index],s[path_index])
-            fid_values[path_index] = fid_value
-            print('Frechet distance', fid_value)
-            print('Frechet distance/dim', fid_value/act.shape[-1])
-            
-            # (1) Marginal distributions
-            #print("Start computing marginal feature distributions")
-            #feat_dist = feature_distribution(activations[0], act)
-            #print("Finish computing feature distributions")
-            #print(feat_dist)
-            
-            # (2) Wasserstein Distance (WD)
-            print("Start computing Wasserstein Distance")
-            params = dict()
-            params["iterations"] = 10000
-            params["h_dim"] = 30
-            params["z_dim"] = 10
-            params["mb_size"] = 128
-            
-            wd_measure = compute_wd(activations[0], act, params)
-            print("WD measure: " + str(wd_measure))
-            
-            
-            # (3) Identifiability 
-            print("Start computing identifiability")
-            identifiability = compute_identifiability(activations[0], act)
-            print("Identifiability measure: " + str(identifiability))
+            results.append([compute_metrics(activations[0], act), path])
         
-    return activations, fid_values
+    return activations, results
 
 
 
