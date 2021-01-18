@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 """
+
 Created on Fri Jan 15 15:52:59 2021
 
 @author: boris
+
 """
+
 import numpy as np
 
 from metrics.feature_distribution import feature_distribution
@@ -11,13 +14,13 @@ from metrics.compute_wd import compute_wd
 from metrics.compute_identifiability import compute_identifiability
 from metrics.fid import compute_frechet_distance
 from metrics.parzen import compute_parzen
-
+from metrics.precision_recall import compute_prc
 
 def compute_metrics(orig_data, synth_data, which_metric=None, wd_params=None):
     results = {}
     if which_metric is None:
         if orig_data.shape[1]<100:
-            which_metric = ['WD','ID','FD','parzen']
+            which_metric = ['WD','ID','FD','parzen', 'PR']
         else:
             which_metric = ['WD','FD']
             
@@ -36,6 +39,7 @@ def compute_metrics(orig_data, synth_data, which_metric=None, wd_params=None):
         print('Finish computing feature distributions')
         print(results['feat_dist'])
 
+
     # (2) Wasserstein Distance (WD)
     if 'WD' in which_metric:
         print('Start computing Wasserstein Distance')
@@ -49,15 +53,25 @@ def compute_metrics(orig_data, synth_data, which_metric=None, wd_params=None):
         results['identifiability'] = compute_identifiability(orig_data, synth_data)
         print('Identifiability measure: ',results['identifiability'])
     
+
     # (4) Frechet distance
     if 'FD' in which_metric:
         results['fid_value'] = compute_frechet_distance(orig_data, synth_data)
         print('Frechet distance', results['fid_value'])
         print('Frechet distance/dim', results['fid_value']/synth_data.shape[-1])
     
+
     # (5) Parzen
     if 'parzen' in which_metric:
         results['parzen_ll'], results['parzen_std'] = compute_parzen(orig_data, synth_data)
         print(f'Parzen Log-Likelihood of test set = {results["parzen_ll"]}, se: {results["parzen_std"]}')
+
             
+    # (6) Precision/Recall
+    if 'PR' in which_metric:
+        results['PR'] = compute_prc(orig_data,synth_data)
         
+    
+        
+    # (7) Privacy
+
