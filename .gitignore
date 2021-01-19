@@ -109,5 +109,10 @@ ENV/
 .vscode/
 .pylintrc
 visualisations/
-data/mnist/
-data
+
+# Data dir content
+data/*
+!data/**/
+!data/__init__.py
+data/amsterdam/*
+!data/amsterdam/*.py
