@@ -20,7 +20,7 @@ from time import time
 
 def batch_pairwise_distances(U, V):
     """Compute pairwise distances between two batches of feature vectors."""
-    with tf.variable_scope('pairwise_dist_block'):
+    with tf.compat.v1.variable_scope('pairwise_dist_block'):
         # Squared norms of each row in U and V.
         norm_u = tf.reduce_sum(tf.square(U), 1)
         norm_v = tf.reduce_sum(tf.square(V), 1)
@@ -44,10 +44,10 @@ class DistanceBlock():
 
         # Initialize TF graph to calculate pairwise distances.
         with tf.device('/cpu:0'):
-            self._features_batch1 = tf.placeholder(tf.float16, shape=[None, self.num_features])
-            self._features_batch2 = tf.placeholder(tf.float16, shape=[None, self.num_features])
+            self._features_batch1 = tf.compat.v1.placeholder(tf.float16, shape=[None, self.num_features])
+            self._features_batch2 = tf.compat.v1.placeholder(tf.float16, shape=[None, self.num_features])
             features_split2 = tf.split(self._features_batch2, self.num_gpus, axis=0)
-            distances_split = []
+            distances_split = []    
             for gpu_idx in range(self.num_gpus):
                 with tf.device('/gpu:%d' % gpu_idx):
                     distances_split.append(batch_pairwise_distances(self._features_batch1, features_split2[gpu_idx]))
@@ -190,6 +190,6 @@ def knn_precision_recall_features(ref_features, eval_features, nhood_sizes=[3],
 
     print('Evaluated k-NN precision and recall in: %gs' % (time() - start))
 
-    return state
+    return state['precision'], state['recall']
 
 #----------------------------------------------------------------------------
