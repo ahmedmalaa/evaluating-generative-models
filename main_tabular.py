@@ -22,7 +22,8 @@ import numpy as np
 import torch
 
 import pickle
-
+import time
+    
 
 from representations.OneClass import OneClassLayer
 
@@ -30,9 +31,9 @@ from representations.OneClass import OneClassLayer
 
 #%% Import functions
 from generative_models.adsgan import adsgan
+from generative_models.gan import gan
 from generative_models.pategan import pategan
 from generative_models.vae import vae
-
 
 
 from metrics.combined import compute_metrics
@@ -363,6 +364,12 @@ synth_data_dir = 'data/tabular/synth'
 visual_dir = 'visualisations'
 debug_train = False
 debug_metrics = False
+
+train_OC = False
+# If train is true, save new model (overwrites old OC model)
+save_OC = True
+
+    
 if debug_metrics:
     which_metric = ['']
 else:
@@ -385,12 +392,12 @@ OC_params  = dict({"rep_dim": None,
 
 OC_hyperparams = dict({"Radius": 1, "nu": 1e-2})
 
-
+methods = ['vae','gan','wgan','adsgan']#, 'pategan'] 
+    
 
 def main():
     plt.close('all')
     
-    methods = ['vae','gan','wgan','adsgan']#, 'pategan'] 
     prc_curves = []
  
         # Load data
@@ -409,26 +416,32 @@ def main():
     
     print('### Training OC embedding model')
     OC_params['input_dim'] = orig_data.shape[1]
-    
-    if OC_params['rep_dim'] is None:
-        OC_params['rep_dim'] = orig_data.shape[1]
-    # Check center definition !
-    OC_hyperparams['center'] = torch.ones(OC_params['rep_dim'])
-    
-    OC_model = OneClassLayer(params=OC_params, 
-                             hyperparams=OC_hyperparams)
-    OC_model.fit(orig_data.to_numpy(), learningRate=OC_params['lr'], 
-                 epochs=OC_params['epochs'],verbosity=True)
+    OC_filename = f'metrics/OC_model_{dataset}.pkl'    
+    if train_OC:
+        if OC_params['rep_dim'] is None:
+            OC_params['rep_dim'] = orig_data.shape[1]
+        # Check center definition !
+        OC_hyperparams['center'] = torch.ones(OC_params['rep_dim'])
         
+        OC_model = OneClassLayer(params=OC_params, 
+                                 hyperparams=OC_hyperparams)
+        OC_model.fit(orig_data.to_numpy(), learningRate=OC_params['lr'], 
+                     epochs=OC_params['epochs'],verbosity=True)
+        if save_OC:
+            pickle.dump((OC_model, OC_params, OC_hyperparams),open(OC_filename,'wb'))
+    else:
+        OC_model,_,_ = pickle.load(open(OC_filename,'rb'))
     
-    
-    # parameters for GANs and Wasserstein distance metrics
+    # parameters for generative models
     params = dict()
-    params["iterations"] = 10000
-    params["h_dim"] = 30
-    params["z_dim"] = 10
+    if debug_train: 
+        params['iterations'] = 10
+    else:
+        params["iterations"] = 10000
+    params["h_dim"] = 200
+    params["z_dim"] = 20
     params["mb_size"] = 128
-    train_ratio = 0.8
+    #train_ratio = 0.8
         
     all_results = []
     X = [orig_X]
@@ -449,7 +462,9 @@ def main():
     
         # Synthetic data generation
         if do_train:
-            if method in ['wgan','gan', 'adsgan']:
+            if method in ['wgan','gan']:
+                synth_data = gan(orig_data, params)
+            elif method == 'adsgan':
                 synth_data = adsgan(orig_data, params)
             elif method == 'pategan':
                 params_pate = {'n_s': 1, 'batch_size': 128, 
@@ -518,3 +533,4 @@ def main():
 
 if __name__ == '__main__':
     all_results = main()
+    pickle.dump(all_results, open(f'metrics/results{time.ctime}.pkl','wb'))
