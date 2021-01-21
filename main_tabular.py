@@ -12,14 +12,19 @@ from sklearn import metrics
 from sklearn.model_selection import StratifiedKFold
 from sklearn.datasets import load_breast_cancer
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.svm import SVC
+from sklearn.naive_bayes import GaussianNB
 
 import matplotlib.pyplot as plt
 
 import pandas as pd
 import numpy as np
-
+import torch
 
 import pickle
+
+
+from representations.OneClass import OneClassLayer
 
 
 
@@ -31,6 +36,8 @@ from generative_models.vae import vae
 
 
 from metrics.combined import compute_metrics
+import metrics.prd_score as prd
+import metrics.prdc as compute_prdc
 
 
 #%% Data loading
@@ -86,29 +93,34 @@ def feature_importance_plot(X,y):
     plt.show()
 
 
-def feature_importance_comparison(X,y, X_s, y_s):
+def feature_importance_comparison(X, Y, method_names=None):
+    
+    num_methods = len(X)
     
     n_trees = 1000
+    importances = []
+    stds = []
     
-    forest = ExtraTreesClassifier(n_trees)
-    forest.fit(X, y)
-    importances = forest.feature_importances_
-    std = np.std([tree.feature_importances_ for tree in forest.estimators_],
-                 axis=0)
+    for i in range(num_methods):
+        forest = ExtraTreesClassifier(n_trees)
+        forest.fit(X[i], Y[i])
+        importances.append(forest.feature_importances_)
+        stds.append(np.std([tree.feature_importances_ for tree in forest.estimators_],
+                     axis=0))
+        
+        if method_names is not None and i>0:
+            print(f'Correlation of importances or method {method_names[i-1]}:')
+            print(np.corrcoef(importances[0],importances[i])[0,1])
     
-    forest = ExtraTreesClassifier(n_trees)
-    forest.fit(X_s, y_s)
-    importances_s = forest.feature_importances_
-    std_s = np.std([tree.feature_importances_ for tree in forest.estimators_],
-                 axis=0)
-    
-    print('Correlation of importances:')
-    print(np.corrcoef(importances,importances_s)[0,1])
-    
-    bar_comparison([importances, importances_s], 
-                   [std, std_s], save_name = 'feat_importance')
+    if method_names is not None:
+        bar_comparison(importances, 
+                   stds, labels=method_names, save_name = 'all_feat_importance')
 
-    
+    return [importances, stds]
+
+
+
+
 def cv_predict_scores(X, y, classifier, n_splits=6):
     """
     Computes CV accuracy and AUROC
@@ -173,13 +185,17 @@ def transfer_scores(X, y, X_s, y_s, classifier):
     return acc, auc
     
 
-def predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y, models=None):
+def predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y, method_name=None, models=None):
     if models is None:
-        models = [LogisticRegression(), 
+        models = [LogisticRegression(max_iter=300), 
               KNeighborsClassifier(), 
-              MLPClassifier(max_iter=200),
-              RandomForestClassifier()]
-        model_names = ['LogReg', 'KNeighbour', 'MLP', 'RandForest']
+              MLPClassifier(max_iter=100),
+              RandomForestClassifier(),
+              SVC(probability=True),
+              GaussianNB()
+              ]
+        model_names = ['Logistic', 'KNeighbour', 'MLP', 'Forest', 'SVM', 
+                       'GaussNB']
     num_models = len(models)
     accs = np.zeros(num_models)
     aucs = np.zeros(num_models)
@@ -225,15 +241,19 @@ def predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y, models=None):
         std_transf_aucs[i] = std_auc              
     
     # plot results
-    plt.close('all')
-    bar_comparison([accs, synth_accs, transf_accs], 
-                   [std_accs, std_synth_accs, std_transf_accs], 
-                   tick_names=model_names, save_name = 'pred_accs')
-    bar_comparison([aucs, synth_aucs, transf_aucs], 
-                   [std_aucs, std_synth_aucs, std_transf_aucs], 
-                   tick_names=model_names, save_name = 'pred_aucs')
-       
-
+    if method_name is not None:
+        bar_comparison([accs, synth_accs, transf_accs], 
+                       [std_accs, std_synth_accs, std_transf_accs], 
+                       tick_names=model_names, save_name = f'{method_name}_pred_accs')
+        bar_comparison([aucs, synth_aucs, transf_aucs], 
+                       [std_aucs, std_synth_aucs, std_transf_aucs], 
+                       tick_names=model_names, save_name = f'{method_name}_pred_aucs')
+        
+    return {'acc':[[accs,synth_accs, transf_accs],
+                   [std_accs,std_synth_accs, std_transf_accs]]
+            ,'auc':[[aucs,synth_aucs, transf_aucs],
+                    [std_aucs,std_synth_aucs, std_transf_aucs]]}
+                
 
     
     
@@ -274,7 +294,7 @@ def bar_comparison(vectors, std=None, labels=None, tick_names=None, save_name = 
     plt.legend()
     plt.xlim([-1, len(vector)])
     if save_name is not None:
-        plt.savefig(f'{visual_dir}/{dataset}_{method}_{save_name}.jpg')
+        plt.savefig(f'{visual_dir}/{dataset}_{save_name}.jpg')
     plt.show()
 
 
@@ -330,103 +350,171 @@ def roc(X, y, classifier, n_splits=6, pos_label = 2):
     return mean_auc, mean_acc    
 
 
+
+
+
 #%%  
 # Set settings:
 dataset = 'covid'
-method = 'vae' #adsgan, wgan, gan, vae
+#method = 'adsgan' #adsgan, wgan, gan, vae
 do_train = False
 original_data_dir = 'data/tabular/original'
 synth_data_dir = 'data/tabular/synth'
 visual_dir = 'visualisations'
 debug_train = False
+debug_metrics = False
+if debug_metrics:
+    which_metric = ['']
+else:
+    which_metric = None
+    
+#Save synthetic data iff we're training
+save_synth = do_train
+train_ratio = 0.8
+
+# OneClass representation model
+OC_params  = dict({"rep_dim": None, 
+                "num_layers": 2, 
+                "num_hidden": 200, 
+                "activation": "Tanh",
+                "dropout_prob": 0.5, 
+                "dropout_active": False,
+                "LossFn": "SoftBoundary",
+                "lr": 1e-2,
+                "epochs": 200})   
+
+OC_hyperparams = dict({"Radius": 1, "nu": 1e-2})
+
+
 
 def main():
     plt.close('all')
     
-    #Save synthetic data iff we're training
-    save_synth = do_train
-    
-    filename =  f'{synth_data_dir}/{dataset}_{method}.csv'
-    
-        
-    # parameters for ADS-GAN and Wasserstein distance metrics
-    params = dict()
-    params["lambda"] = 0.1
-    params["iterations"] = 10000
-    params["h_dim"] = 30
-    params["z_dim"] = 10
-    params["mb_size"] = 128
-    params['gen_model_name'] = method
-    
-    if method != 'adsgan':
-        params['lambda'] = 0
-        
-    train_ratio = 0.8
-    
-    # Load data
+    methods = ['vae','gan','wgan','adsgan']#, 'pategan'] 
+    prc_curves = []
+ 
+        # Load data
     if dataset == 'bc':
         orig_data = load_breast_cancer_data()  
     elif dataset == 'covid':
         orig_data = load_covid_data()  
-    
-
-    # Synthetic data generation
-    if do_train:
-        if method in ['wgan','gan', 'adsgan']:
-            synth_data = adsgan(orig_data, params)
-        elif method == 'pategan':
-            params_pate = {'n_s': 1, 'batch_size': 128, 
-                 'k': 100, 'epsilon': 100, 'delta': 0.0001, 'lambda': 1}
-            
-        
-            synth_data = pategan(orig_data.to_numpy(), params_pate)  
-        elif method=='vae':
-            synth_data = vae(orig_data, params)
-            
-        if save_synth:
-            pickle.dump((synth_data, params),open(filename,'wb'))
-    
     else:
-        synth_data, params = pickle.load(open(filename,'rb'))
+        raise ValueError('Not a valid dataset name given')
     
-    if debug_train:
-        return synth_data
-    
-    ## Performance measures from ADS-GAN paper, FID and Parzen
-    results_metrics = compute_metrics(orig_data, synth_data, wd_params = params)
-    
-    synth_data = pd.DataFrame(synth_data,columns = orig_data.columns)
-
-
     # Some different data definitions
-    orig_train_index = round(len(orig_data)*train_ratio)
+    #orig_train_index = round(len(orig_data)*train_ratio)
     orig_X, orig_Y = orig_data.drop(columns=['target']), orig_data.target
     # orig_X_train, orig_X_test = orig_X[:orig_train_index], orig_X[orig_train_index:]
     # orig_Y_train, orig_Y_test = orig_Y[:orig_train_index], orig_Y[orig_train_index:]
-      
-    synth_train_index = round(len(synth_data)*train_ratio)
-    synth_X, synth_Y = synth_data.drop(columns=['target']), synth_data.target
-    # synth_X_train, synth_X_test = synth_X[:synth_train_index], synth_X[synth_train_index:]
-    # synth_Y_train, synth_Y_test = synth_Y[:synth_train_index], synth_Y[synth_train_index:]
+    
+    print('### Training OC embedding model')
+    OC_params['input_dim'] = orig_data.shape[1]
+    
+    if OC_params['rep_dim'] is None:
+        OC_params['rep_dim'] = orig_data.shape[1]
+    # Check center definition !
+    OC_hyperparams['center'] = torch.ones(OC_params['rep_dim'])
+    
+    OC_model = OneClassLayer(params=OC_params, 
+                             hyperparams=OC_hyperparams)
+    OC_model.fit(orig_data.to_numpy(), learningRate=OC_params['lr'], 
+                 epochs=OC_params['epochs'],verbosity=True)
+        
     
     
-    ### predictive performance
+    # parameters for GANs and Wasserstein distance metrics
+    params = dict()
+    params["iterations"] = 10000
+    params["h_dim"] = 30
+    params["z_dim"] = 10
+    params["mb_size"] = 128
+    train_ratio = 0.8
+        
+    all_results = []
+    X = [orig_X]
+    Y = [orig_Y]
     
-    ## RANKING: 
-    # how ranking (accuracy and AUC) of different models compares
-    # between the synthetic and original dataset
-    plt.close('all')
-    #predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y)
     
-    # example of ROC computation
-    #roc(synth_X, synth_Y, LogisticRegression())
+    for method in methods:
+        print(f'\n============== {method} ==============')
+        filename =  f'{synth_data_dir}/{dataset}_{method}.csv'
+        
+        params['gen_model_name'] = method
+        
+        if method != 'adsgan':
+            params['lambda'] = 0
+        else:
+            params["lambda"] = 0.1
+        
+    
+        # Synthetic data generation
+        if do_train:
+            if method in ['wgan','gan', 'adsgan']:
+                synth_data = adsgan(orig_data, params)
+            elif method == 'pategan':
+                params_pate = {'n_s': 1, 'batch_size': 128, 
+                     'k': 100, 'epsilon': 100, 'delta': 0.0001, 'lambda': 1}
+                
+            
+                synth_data = pategan(orig_data.to_numpy(), params_pate)  
+            elif method=='vae':
+                synth_data = vae(orig_data, params)
+                
+            if save_synth:
+                pickle.dump((synth_data, params),open(filename,'wb'))
+        
+        else:
+            synth_data, params = pickle.load(open(filename,'rb'))
+        
+        if debug_train:
+            return synth_data
+    
+        ## Performance measures from ADS-GAN paper, FID and Parzen
+        if debug_metrics:
+            orig_data = orig_data.loc[:100]
+            synth_data = synth_data[:100]
+        
+        print('#### Computing static metrics')
+        results_metrics = compute_metrics(orig_data.to_numpy(), synth_data, 
+                                          which_metric=which_metric, 
+                                          wd_params = params, model=OC_model)
+        
+        #prc_curves.append(results_metrics['PR'])
+        
+        synth_data = pd.DataFrame(synth_data,columns = orig_data.columns)
     
     
-    ### Feature importance between orig and synth data
-    feature_importance_comparison(orig_X, orig_Y, synth_X, synth_Y)
+          
+        synth_X, synth_Y = synth_data.drop(columns=['target']), synth_data.target
+        X.append(synth_X)
+        Y.append(synth_Y)
+        # synth_train_index = round(len(synth_data)*train_ratio)
+        # synth_X_train, synth_X_test = synth_X[:synth_train_index], synth_X[synth_train_index:]
+        # synth_Y_train, synth_Y_test = synth_Y[:synth_train_index], synth_Y[synth_train_index:]
+        
+        
+        ### predictive performance
+        
+        ## RANKING: 
+        # how ranking (accuracy and AUC) of different models compares
+        # between the synthetic and original dataset
+        #plt.close('all')
+        print('#### Computing predictive metrics')
+        
+        pred_perf = predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y, method_name=method)
+        
+        # example of ROC computation
+        #roc(synth_X, synth_Y, LogisticRegression())
+        
+        
+        ### Feature importance between orig and synth data
+        all_results.append([results_metrics, pred_perf])
     
-    return orig_data, synth_data
+    feat_imp = feature_importance_comparison(X,Y, method_names=['orig']+methods)
+        
+    #prd.plot([prc_curves], out_path=None)
 
+    return all_results
 
 if __name__ == '__main__':
-    orig_data, synth_data = main()
+    all_results = main()

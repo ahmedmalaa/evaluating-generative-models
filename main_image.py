@@ -15,7 +15,9 @@ from keras.applications.vgg16 import preprocess_input
 from keras.models import Model
 
 import numpy as np
+import torch
 
+from representations.OneClass import OneClassLayer
 from metrics.combined import compute_metrics
 
 
@@ -209,12 +211,38 @@ def main(paths, embedding, load_act=True, save_act=True, verbose = False):
                     
         activations.append(act)            
         
-        # Frechet distance statistics
-        if path_index!=0:
-            results.append([compute_metrics(activations[0], act), path])
+        # compute metrics
+        if path_index == 0:
+            OC_params['input_dim'] = act.shape[1]
+    
+            if OC_params['rep_dim'] is None:
+                OC_params['rep_dim'] = act.shape[1]
+            # Check center definition !
+            OC_hyperparams['center'] = torch.ones(OC_params['rep_dim'])
+            
+            OC_model = OneClassLayer(params=OC_params, 
+                                     hyperparams=OC_hyperparams)
+            OC_model.fit(act, learningRate=OC_params['lr'], 
+                         epochs=OC_params['epochs'],verbosity=True)
+            OC_model.eval()
+        else:
+            results.append([compute_metrics(activations[0], act, model=OC_model), path])
         
-    return activations, results
+        
+    return results
 
+
+OC_params  = dict({"rep_dim": 100, 
+                "num_layers": 2, 
+                "num_hidden": 200, 
+                "activation": "Tanh",
+                "dropout_prob": 0.5, 
+                "dropout_active": False,
+                "LossFn": "SoftBoundary",
+                "lr": 1e-2,
+                "epochs": 200})   
+
+OC_hyperparams = dict({"Radius": 1, "nu": 1e-2})
 
 
 
@@ -229,18 +257,19 @@ if __name__ == '__main__':
     other_paths = [f'data/mnist/synth/{method}' for method in methods]
     paths = nul_path + other_paths
     embeddings = []
-#    embeddings.append(None)
+    #embeddings.append(None)
     embeddings.append({'model':'inceptionv3',
                  'randomise': False, 'dim64': False})
     embeddings.append({'model':'vgg16',
                  'randomise': False, 'dim64': False})
-    embeddings.append({'model':'vgg16',
-                 'randomise': True, 'dim64': False})
+    #embeddings.append({'model':'vgg16',
+    #             'randomise': True, 'dim64': False})
     embeddings.append({'model':'vgg16',
                  'randomise': True, 'dim64': True})
     
-        
+    outputs = []
+    
     for embedding in embeddings:
         output = main(paths, embedding, load_act, save_act,verbose=True)
-        activations, fid_values = output
+        outputs.append(output)
     
