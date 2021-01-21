@@ -68,7 +68,7 @@ def load_covid_data():
 
 #%% Feature importance plots
 
-def feature_importance_plot(X,y):
+def feature_importance_plot(X,y, num_features = 10):
     
     forest = RandomForestClassifier()
     forest.fit(X, y)
@@ -76,17 +76,18 @@ def feature_importance_plot(X,y):
     std = np.std([tree.feature_importances_ for tree in forest.estimators_],
                axis=0)
     indices = np.argsort(importances)[::-1]
-    
+    indices = indices[:num_features]
     # Print the feature ranking
     print("Feature ranking:")
     
     for f in range(X.shape[1]):
         print("%d. feature %s (%f)" % (f + 1, X.columns[indices[f]], importances[indices[f]]))
     
+    
     # Plot the impurity-based feature importances of the forest
     plt.figure()
     plt.title("Feature importances")
-    plt.bar(range(X.shape[1]), importances[indices],
+    plt.bar(range(num_features), importances[indices],
             color="r", yerr=std[indices], align="center")
     tick_names = indices # X.columns[indices]
     plt.xticks(range(X.shape[1]), tick_names)
@@ -115,7 +116,7 @@ def feature_importance_comparison(X, Y, method_names=None):
     
     if method_names is not None:
         bar_comparison(importances, 
-                   stds, labels=method_names, save_name = 'all_feat_importance')
+                   stds, labels=method_names, tick_names = X[0].columns, save_name = 'all_feat_importance')
 
     return [importances, stds]
 
@@ -263,15 +264,16 @@ def predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y, method_name=No
 
 #%% Misc
     
-def bar_comparison(vectors, std=None, labels=None, tick_names=None, save_name = None):
+def bar_comparison(vectors, std=None, labels=None, tick_names=None, save_name = None, max_length = 10):
     
     num_bars = len(vectors)
     vector = vectors[0]
     indices = np.argsort(vector)[::-1]
+    indices = indices[:max_length]
     fig, ax = plt.subplots()
     tot_bar_width = 0.7
     width = tot_bar_width/num_bars
-    x = np.arange(len(vector)) 
+    x = np.arange(len(indices)) 
     
     if tick_names is None:
         tick_names = range(len(vector))
@@ -290,10 +292,11 @@ def bar_comparison(vectors, std=None, labels=None, tick_names=None, save_name = 
     ax.set_ylim(bottom=0)
     fig.tight_layout()
     ticks = np.array(tick_names, dtype='object')
+    print(indices,ticks)
     ticks = ticks[indices]
     plt.xticks(x, ticks)
     plt.legend()
-    plt.xlim([-1, len(vector)])
+    plt.xlim([-1, len(indices)])
     if save_name is not None:
         plt.savefig(f'{visual_dir}/{dataset}_{save_name}.jpg')
     plt.show()
@@ -490,9 +493,9 @@ def main():
             synth_data = synth_data[:100]
         
         print('#### Computing static metrics')
-        results_metrics = compute_metrics(orig_data.to_numpy(), synth_data, 
-                                          which_metric=which_metric, 
-                                          wd_params = params, model=OC_model)
+        #results_metrics = compute_metrics(orig_data.to_numpy(), synth_data, 
+#                                          which_metric=which_metric, 
+ #                                         wd_params = params, model=OC_model)
         
         #prc_curves.append(results_metrics['PR'])
         
@@ -516,14 +519,14 @@ def main():
         #plt.close('all')
         print('#### Computing predictive metrics')
         
-        pred_perf = predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y, method_name=method)
+        #pred_perf = predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y, method_name=method)
         
         # example of ROC computation
         #roc(synth_X, synth_Y, LogisticRegression())
         
         
         ### Feature importance between orig and synth data
-        all_results.append([results_metrics, pred_perf])
+        #all_results.append([results_metrics, pred_perf])
     
     feat_imp = feature_importance_comparison(X,Y, method_names=['orig']+methods)
         
@@ -533,4 +536,4 @@ def main():
 
 if __name__ == '__main__':
     all_results = main()
-    pickle.dump(all_results, open(f'metrics/results{time.ctime}.pkl','wb'))
+    pickle.dump(all_results, open(f'metrics/results{round(time.time())}.pkl','wb'))

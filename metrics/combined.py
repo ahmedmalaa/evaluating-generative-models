@@ -36,10 +36,13 @@ def compute_metrics(X, Y, which_metric=None, wd_params=None, model=None):
         wd_params['z_dim'] = 10
         wd_params['mb_size'] = 128
     
-    
+    if which_metric is None:
+            which_metric = [['WD','ID','FD', 'PRDC', 'OC'], # normal
+                            []]                   # additional OneClass
+            
     for emb_index, emb in enumerate(emb_types):
         
-        if emb_index == 1:
+        if emb_index == 1 and len(which_metric[1])>0:
             print('Computing metrics for OneClass embedding')
             with torch.no_grad():
                 X = model(torch.tensor(X).float()).detach().numpy()
@@ -47,9 +50,7 @@ def compute_metrics(X, Y, which_metric=None, wd_params=None, model=None):
         else:
             print('Computing metrics for no additional OneClass embedding')
     
-        if which_metric is None:
-            which_metric = [['WD','ID','FD', 'PRDC'], # normal
-                            ['OC']]                   # additional OneClass
+        
         
         # (1) Marginal distributions
         if 'marg' in which_metric[emb_index]:
