@@ -1,1 +1,0 @@
-from .pategan import pategan
