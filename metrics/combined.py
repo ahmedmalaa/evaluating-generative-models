@@ -20,23 +20,15 @@ from metrics.evaluation import compute_alpha_precision
 import torch
 import numpy as np
 
-def compute_metrics(X, Y, which_metric=None, wd_params=None, model=None, OC4all=False):
+def compute_metrics(X, Y, which_metric=None, wd_params=None, model=None):
     results = {}
+    emb_types = ['']
     
     if model is not None:
-        with torch.no_grad():
-            X_out = model(torch.tensor(X).float()).detach().numpy()
-            Y_out = model(torch.tensor(Y).float()).detach().numpy()
-        if OC4all:
-            X, Y = X_out, Y_out
-    
-    
-    if which_metric is None:
-        if X.shape[1]<100:
-            which_metric = ['WD','ID','FD', 'PRDC']
-        else:
-            which_metric = ['WD','ID', 'FD', 'PRDC']
-            
+        emb_types.append('_OC')    
+    else:
+        print('#####################!OC model not defined !##################')
+        
     if wd_params is None:
         wd_params = dict()
         wd_params['iterations'] = 10000
@@ -44,67 +36,81 @@ def compute_metrics(X, Y, which_metric=None, wd_params=None, model=None, OC4all=
         wd_params['z_dim'] = 10
         wd_params['mb_size'] = 128
     
-    # (1) Marginal distributions
-    if 'marg' in which_metric:
+    
+    for emb_index, emb in enumerate(emb_types):
         
-        print('Start computing marginal feature distributions')
-        results['feat_dist'] = feature_distribution(X, Y)
-        print('Finish computing feature distributions')
-        print(results['feat_dist'])
-
-
-    # (2) Wasserstein Distance (WD)
-    if 'WD' in which_metric:
-        print('Start computing Wasserstein Distance')
-        results['wd_measure'] = compute_wd(X, Y, wd_params)
-        print('WD measure: ',results['wd_measure'])
+        if emb_index == 1:
+            print('Computing metrics for OneClass embedding')
+            with torch.no_grad():
+                X = model(torch.tensor(X).float()).detach().numpy()
+                Y = model(torch.tensor(Y).float()).detach().numpy()
+        else:
+            print('Computing metrics for no additional OneClass embedding')
     
-    
-    # (3) Identifiability 
-    if 'ID' in which_metric:
-        print('Start computing identifiability')
-        results['identifiability'] = compute_identifiability(X, Y)
-        print('Identifiability measure: ',results['identifiability'])
-    
-
-    # (4) Frechet distance
-    if 'FD' in which_metric:
-        results['fid_value'] = compute_frechet_distance(X, Y)
-        print('Frechet distance', results['fid_value'])
-        print('Frechet distance/dim', results['fid_value']/Y.shape[-1])
-    
-
-    # (5) Parzen
-    if 'parzen' in which_metric:
-        results['parzen_ll'], results['parzen_std'] = compute_parzen(X, Y, sigma=0.408)
-        print(f'Parzen Log-Likelihood of test set = {results["parzen_ll"]}, se: {results["parzen_std"]}')
-
+        if which_metric is None:
+            which_metric = [['WD','ID','FD', 'PRDC'], # normal
+                            ['OC']]                   # additional OneClass
+        
+        # (1) Marginal distributions
+        if 'marg' in which_metric[emb_index]:
             
-    # (6) Precision/Recall
-    if 'PR' in which_metric:
-        results['PR'] = compute_prc(X,Y)
-    elif 'PRDC' in which_metric:
-        prdc_res = compute_prdc(X,Y)
-        for key in prdc_res:
-            print('PRDC:', key, prdc_res[key])
-            results[key] = prdc_res[key]
+            print('Start computing marginal feature distributions')
+            results[f'feat_dist{emb}'] = feature_distribution(X, Y)
+            print('Finish computing feature distributions')
+            print(results[f'feat_dist{emb}'])
     
-    # (7) OneClass
-    if model is not None:
+    
+        # (2) Wasserstein Distance (WD)
+        if 'WD' in which_metric[emb_index]:
+            print('Start computing Wasserstein Distance')
+            results[f'wd_measure{emb}'] = compute_wd(X, Y, wd_params)
+            print('WD measure: ',results[f'wd_measure{emb}'])
         
-        alphas, alpha_precision_curve, beta_coverage_curve, Delta_precision_alpha, Delta_coverage_beta, (thresholds, authen) = compute_alpha_precision(X_out, Y_out, model)
-        results['alphas'] = alphas
-        results['alpha_pc'] = alpha_precision_curve
-        results['beta_cv'] = beta_coverage_curve
-        results['thresholds'] = thresholds
-        results['auten'] = authen
-        results['Dpa'] = Delta_precision_alpha
-        results['Dcb'] = Delta_coverage_beta
-        results['Daut'] = np.mean(authen)
-        print(np.min(thresholds), np.max(thresholds))
-        print('OneClass: Delta_precision_alpha', results['Dpa'])
-        print('OneClass: Delta_coverage_beta  ', results['Dcb'])
-        print('OneClass: Delta_autenticity    ', results['Daut'])
+        
+        # (3) Identifiability 
+        if 'ID' in which_metric[emb_index]:
+            print('Start computing identifiability')
+            results[f'identifiability{emb}'] = compute_identifiability(X, Y)
+            print('Identifiability measure: ',results[f'identifiability{emb}'])
+        
+    
+        # (4) Frechet distance
+        if 'FD' in which_metric[emb_index]:
+            results[f'fid_value{emb}'] = compute_frechet_distance(X, Y)
+            print('Frechet distance', results[f'fid_value{emb}'])
+            print('Frechet distance/dim', results[f'fid_value{emb}']/Y.shape[-1])
+        
+    
+        # (5) Parzen
+        if 'parzen' in which_metric[emb_index]:
+            results[f'parzen_ll{emb}'], results[f'parzen_std{emb}'] = compute_parzen(X, Y, sigma=0.408)
+            print(f'Parzen Log-Likelihood of test set = {results["parzen_ll"]}, se: {results["parzen_std"]}')
+    
+                
+        # (6) Precision/Recall
+        if 'PR' in which_metric[emb_index]:
+            results[f'PR{emb}'] = compute_prc(X,Y)
+        elif 'PRDC' in which_metric:
+            prdc_res = compute_prdc(X,Y)
+            for key in prdc_res:
+                print('PRDC:', key, prdc_res[key])
+                results[key+emb] = prdc_res[key]
+        
+        # (7) OneClass
+        if 'OC' in which_metric[emb_index]:
+            OC_res = compute_alpha_precision(X, Y, model)
+            alphas, alpha_precision_curve, beta_coverage_curve, Delta_precision_alpha, Delta_coverage_beta, (thresholds, authen) = OC_res
+            results[f'alphas{emb}'] = alphas
+            results[f'alpha_pc{emb}'] = alpha_precision_curve
+            results[f'beta_cv{emb}'] = beta_coverage_curve
+            results[f'thresholds{emb}'] = thresholds
+            results[f'auten{emb}'] = authen
+            results[f'Dpa{emb}'] = Delta_precision_alpha
+            results[f'Dcb{emb}'] = Delta_coverage_beta
+            results[f'Daut{emb}'] = np.mean(authen)
+            print('OneClass: Delta_precision_alpha', results[f'Dpa{emb}'])
+            print('OneClass: Delta_coverage_beta  ', results[f'Dcb{emb}'])
+            print('OneClass: Delta_autenticity    ', results[f'Daut{emb}'])
         
 
     return results
