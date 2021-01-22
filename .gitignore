@@ -109,6 +109,7 @@ ENV/
 .vscode/
 .pylintrc
 visualisations/
+jupyter/
 
 # Data dir content
 data/*
@@ -116,3 +117,5 @@ data/*
 !data/__init__.py
 data/amsterdam/*
 !data/amsterdam/*.py
+data/stock/*
+!data/stock/*.py
