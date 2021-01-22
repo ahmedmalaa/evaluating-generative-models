@@ -101,7 +101,7 @@ def feedforward_network(params):
 
     # Input layer    
 
-    modules.append(torch.nn.Linear(params["input_dim"], params["num_hidden"]))
+    modules.append(torch.nn.Linear(params["input_dim"], params["num_hidden"],bias=False))
     modules.append(ACTIVATION_DICT[params["activation"]])
 
     # Intermediate layers
@@ -112,13 +112,14 @@ def feedforward_network(params):
 
             modules.append(torch.nn.Dropout(p=params["dropout_prob"]))
 
-        modules.append(torch.nn.Linear(params["num_hidden"], params["num_hidden"]))
+        modules.append(torch.nn.Linear(params["num_hidden"], params["num_hidden"],
+                                       bias=False))
         modules.append(ACTIVATION_DICT[params["activation"]])
 
     
     # Output layer    
 
-    modules.append(torch.nn.Linear(params["num_hidden"], params["rep_dim"]))
+    modules.append(torch.nn.Linear(params["num_hidden"], params["rep_dim"],bias=False))
 
     _architecture    = nn.Sequential(*modules)
 

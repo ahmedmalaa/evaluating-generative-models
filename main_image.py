@@ -228,8 +228,7 @@ def main(paths, embedding, load_act=True, save_act=True, verbose = False):
                 
                 OC_model = OneClassLayer(params=OC_params, 
                                          hyperparams=OC_hyperparams)
-                OC_model.fit(act, learningRate=OC_params['lr'], 
-                             epochs=OC_params['epochs'],verbosity=True)
+                OC_model.fit(act,verbosity=True)
                 if save_OC:
                     pickle.dump((OC_model, OC_params, OC_hyperparams),open(OC_filename,'wb'))
             
@@ -248,12 +247,16 @@ def main(paths, embedding, load_act=True, save_act=True, verbose = False):
 OC_params  = dict({"rep_dim": 100, 
                 "num_layers": 2, 
                 "num_hidden": 200, 
-                "activation": "Tanh",
+                "activation": "ReLU",
                 "dropout_prob": 0.5, 
                 "dropout_active": False,
                 "LossFn": "SoftBoundary",
-                "lr": 1e-2,
-                "epochs": 1000})   
+                "lr": 1e-3,
+                "epochs": 500,
+                "warm_up_epochs" : 10,
+                "train_prop" : 0.8,
+                "weight_decay": 1e-2}   
+)   
 
 OC_hyperparams = dict({"Radius": 1, "nu": 1e-2})
 
@@ -267,8 +270,9 @@ if __name__ == '__main__':
     load_act = True
     save_act = True
     nul_path = ['data/mnist/original/testing']
+    random_path = ['data/mnist/random']
     other_paths = [f'data/mnist/synth/{method}' for method in methods]
-    paths = nul_path + other_paths
+    paths = nul_path + nul_path + random_path + other_paths
     embeddings = []
     
     dataset = 'MNIST'
@@ -278,12 +282,12 @@ if __name__ == '__main__':
     #embeddings.append(None)
     embeddings.append({'model':'inceptionv3',
                  'randomise': False, 'dim64': False})
-    #embeddings.append({'model':'vgg16',
-    #             'randomise': False, 'dim64': False})
+    embeddings.append({'model':'vgg16',
+                 'randomise': False, 'dim64': False})
     #embeddings.append({'model':'vgg16',
     #             'randomise': True, 'dim64': False})
-    #embeddings.append({'model':'vgg16',
-     #            'randomise': True, 'dim64': True})
+    embeddings.append({'model':'vgg16',
+                'randomise': True, 'dim64': True})
     
     outputs = []
     

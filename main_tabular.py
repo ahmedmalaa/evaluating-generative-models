@@ -361,20 +361,32 @@ def roc(X, y, classifier, n_splits=6, pos_label = 2):
 # Set settings:
 dataset = 'covid'
 #method = 'adsgan' #adsgan, wgan, gan, vae
-do_train = False
+
 original_data_dir = 'data/tabular/original'
 synth_data_dir = 'data/tabular/synth'
 visual_dir = 'visualisations'
+
+# Train generative models
+do_train = False
+
+
 debug_train = False
-debug_metrics = False
+debug_OC = True
+debug_metrics = True
+if debug_OC:
+    debug_metrics = True
 
-train_OC = False
+
+# Train OneClass representation model
+train_OC = True
 # If train is true, save new model (overwrites old OC model)
-save_OC = True
-
-    
-if debug_metrics:
+save_OC = False
+ 
+if debug_OC:
+    which_metric = [['OC'],['OC']]
+elif debug_metrics:
     which_metric = ['']
+
 else:
     which_metric = None
     
@@ -383,19 +395,22 @@ save_synth = do_train
 train_ratio = 0.8
 
 # OneClass representation model
-OC_params  = dict({"rep_dim": None, 
+OC_params  = dict({"rep_dim": 32, 
                 "num_layers": 2, 
-                "num_hidden": 200, 
-                "activation": "Tanh",
+                "num_hidden": 100, 
+                "activation": "ReLU",
                 "dropout_prob": 0.5, 
                 "dropout_active": False,
                 "LossFn": "SoftBoundary",
-                "lr": 1e-2,
-                "epochs": 200})   
+                "lr": 1e-3,
+                "epochs": 2000,
+                "warm_up_epochs" : 10,
+                "train_prop" : 0.8,
+                "weight_decay": 1e-2})   
 
 OC_hyperparams = dict({"Radius": 1, "nu": 1e-2})
 
-methods = ['vae','gan','wgan','adsgan']#, 'pategan'] 
+methods = ['orig','random','vae','gan','wgan','adsgan']#, 'pategan'] 
     
 
 def main():
@@ -428,8 +443,7 @@ def main():
         
         OC_model = OneClassLayer(params=OC_params, 
                                  hyperparams=OC_hyperparams)
-        OC_model.fit(orig_data.to_numpy(), learningRate=OC_params['lr'], 
-                     epochs=OC_params['epochs'],verbosity=True)
+        OC_model.fit(orig_data.to_numpy(), verbosity=True)
         if save_OC:
             pickle.dump((OC_model, OC_params, OC_hyperparams),open(OC_filename,'wb'))
     else:
@@ -464,7 +478,13 @@ def main():
         
     
         # Synthetic data generation
-        if do_train:
+        if method == 'orig':
+            # This is for sanity checking metrics
+            synth_data = orig_data.to_numpy()
+        elif method == 'random':
+            # Also for sanity check
+            synth_data = np.random.uniform(size=orig_data.shape)
+        elif do_train:
             if method in ['wgan','gan']:
                 synth_data = gan(orig_data, params)
             elif method == 'adsgan':
@@ -493,10 +513,9 @@ def main():
             synth_data = synth_data[:100]
         
         print('#### Computing static metrics')
-        #results_metrics = compute_metrics(orig_data.to_numpy(), synth_data, 
-#                                          which_metric=which_metric, 
- #                                         wd_params = params, model=OC_model)
-        
+        results_metrics = compute_metrics(orig_data.to_numpy(), synth_data, 
+                                          which_metric=which_metric, 
+                                          wd_params = params, model=OC_model)
         #prc_curves.append(results_metrics['PR'])
         
         synth_data = pd.DataFrame(synth_data,columns = orig_data.columns)
@@ -519,15 +538,21 @@ def main():
         #plt.close('all')
         print('#### Computing predictive metrics')
         
-        #pred_perf = predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y, method_name=method)
+        if debug_metrics:
+            pred_perf = None
+        else:
+            pred_perf = predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y, method_name=method)
         
         # example of ROC computation
         #roc(synth_X, synth_Y, LogisticRegression())
         
         
         ### Feature importance between orig and synth data
-        #all_results.append([results_metrics, pred_perf])
+        all_results.append([results_metrics, pred_perf])
     
+    if debug_metrics or debug_train:
+        return all_results
+        
     feat_imp = feature_importance_comparison(X,Y, method_names=['orig']+methods)
         
     #prd.plot([prc_curves], out_path=None)
@@ -536,4 +561,4 @@ def main():
 
 if __name__ == '__main__':
     all_results = main()
-    pickle.dump(all_results, open(f'metrics/results{round(time.time())}.pkl','wb'))
+    #pickle.dump(all_results, open(f'metrics/results{round(time.time())}.pkl','wb'))
