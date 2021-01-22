@@ -37,8 +37,8 @@ def compute_metrics(X, Y, which_metric=None, wd_params=None, model=None):
         wd_params['mb_size'] = 128
     
     if which_metric is None:
-            which_metric = [['WD','ID','FD', 'PRDC', 'OC'], # normal
-                            []]                   # additional OneClass
+            which_metric = [['WD','ID','FD', 'PRDC'], # normal
+                            ['OC']]                   # additional OneClass
             
     for emb_index, emb in enumerate(emb_types):
         
@@ -92,6 +92,7 @@ def compute_metrics(X, Y, which_metric=None, wd_params=None, model=None):
         if 'PR' in which_metric[emb_index]:
             results[f'PR{emb}'] = compute_prc(X,Y)
         elif 'PRDC' in which_metric:
+            print('Start computing P&R and D&C')
             prdc_res = compute_prdc(X,Y)
             for key in prdc_res:
                 print('PRDC:', key, prdc_res[key])
@@ -99,7 +100,11 @@ def compute_metrics(X, Y, which_metric=None, wd_params=None, model=None):
         
         # (7) OneClass
         if 'OC' in which_metric[emb_index]:
-            OC_res = compute_alpha_precision(X, Y, model)
+            if emb_index==1:
+                emb_center = model.c
+            else:
+                emb_center = np.mean(X,axis=0)
+            OC_res = compute_alpha_precision(X, Y, emb_center)
             alphas, alpha_precision_curve, beta_coverage_curve, Delta_precision_alpha, Delta_coverage_beta, (thresholds, authen) = OC_res
             results[f'alphas{emb}'] = alphas
             results[f'alpha_pc{emb}'] = alpha_precision_curve
