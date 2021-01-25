@@ -143,13 +143,15 @@ class OneClassLayer(BaseNet):
         
         if self.train_prop != 1:
             x_train, x_val = x_train[:int(self.train_prop*len(x_train))], x_train[int(self.train_prop*len(x_train)):]
+            if torch.cuda.is_available():
+                inputs_val = Variable(torch.from_numpy(x_val).cuda()).float()
+            
+            else:
+                inputs_val = Variable(torch.from_numpy(x_val)).float()
+            
+        
         self.losses         = []
         self.loss_vals       = []
-        if torch.cuda.is_available():
-            inputs_val = Variable(torch.from_numpy(x_val).cuda()).float()
-        
-        else:
-            inputs_val = Variable(torch.from_numpy(x_val)).float()
                 
         
         for epoch in range(self.epochs):
