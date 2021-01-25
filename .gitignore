@@ -112,3 +112,4 @@ visualisations/
 data/mnist/
 data
 *.pkl
+.tmp*
