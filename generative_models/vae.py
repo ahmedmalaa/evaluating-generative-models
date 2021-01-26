@@ -93,7 +93,10 @@ def vae(orig_data, params):
                             
     # X_recon from the real data
     def X_recon_X(m, n):
-        return np.random.permutation(m)[:n]        
+        return np.random.permutation(m)[:n]  
+
+    def sample_Z(m,n):
+        return tf.random.normal((m,n), 0, 1, dtype=tf.float32)
              
     #%% Placeholder
     # Feature
@@ -184,8 +187,9 @@ def vae(orig_data, params):
         _, E_loss1_curr, E_loss2_curr = sess.run([solver, loss1, loss2], feed_dict = {X: X_mb})
             
     #%% Output Generation
-    synth_data = sess.run([X_recon], feed_dict = {X: orig_data})
+    synth_data = sess.run([X_recon], feed_dict = {Z: np.random.randn(no, z_dim)})
     synth_data = synth_data[0]
+    print(synth_data.shape)
             
     # Renormalization
     synth_data = data_renormalization(synth_data, normalization_params)

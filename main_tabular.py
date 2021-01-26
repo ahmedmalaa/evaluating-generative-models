@@ -12,28 +12,35 @@ from sklearn import metrics
 from sklearn.model_selection import StratifiedKFold
 from sklearn.datasets import load_breast_cancer
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.svm import SVC
+from sklearn.naive_bayes import GaussianNB
 
 import matplotlib.pyplot as plt
 
 import pandas as pd
 import numpy as np
-
+import torch
+import tensorflow as tf
+import os
 
 import pickle
+import time
+    
+
+from representations.OneClass import OneClassLayer
 
 
 
 #%% Import functions
 from generative_models.adsgan import adsgan
+from generative_models.gan import gan
 from generative_models.pategan import pategan
 from generative_models.vae import vae
 
 
-
-from metrics.feature_distribution import feature_distribution
-from metrics.compute_wd import compute_wd
-from metrics.compute_identifiability import compute_identifiability
-from metrics.fid import compute_frechet_distance
+from metrics.combined import compute_metrics
+import metrics.prd_score as prd
+from main_image import get_activation
 
 
 #%% Data loading
@@ -59,11 +66,23 @@ def load_covid_data():
     df = pd.DataFrame(X,columns = df.columns)
     return df
 
+def load_mnist_data(path, embedding_no=3):
+    embeddings = []
+    embeddings.append({'model':'inceptionv3',
+                 'randomise': False, 'dim64': False})
+    embeddings.append({'model':'vgg16',
+                 'randomise': False, 'dim64': False})
+    embeddings.append({'model':'vgg16',
+                 'randomise': True, 'dim64': False})
+    embeddings.append({'model':'vgg16',
+                'randomise': True, 'dim64': True})
+    return get_activation(path, 
+                          embedding=embeddings[embedding_no]) 
     
 
 #%% Feature importance plots
 
-def feature_importance_plot(X,y):
+def feature_importance_plot(X,y, num_features = 10):
     
     forest = RandomForestClassifier()
     forest.fit(X, y)
@@ -71,17 +90,18 @@ def feature_importance_plot(X,y):
     std = np.std([tree.feature_importances_ for tree in forest.estimators_],
                axis=0)
     indices = np.argsort(importances)[::-1]
-    
+    indices = indices[:num_features]
     # Print the feature ranking
     print("Feature ranking:")
     
     for f in range(X.shape[1]):
         print("%d. feature %s (%f)" % (f + 1, X.columns[indices[f]], importances[indices[f]]))
     
+    
     # Plot the impurity-based feature importances of the forest
     plt.figure()
     plt.title("Feature importances")
-    plt.bar(range(X.shape[1]), importances[indices],
+    plt.bar(range(num_features), importances[indices],
             color="r", yerr=std[indices], align="center")
     tick_names = indices # X.columns[indices]
     plt.xticks(range(X.shape[1]), tick_names)
@@ -89,29 +109,34 @@ def feature_importance_plot(X,y):
     plt.show()
 
 
-def feature_importance_comparison(X,y, X_s, y_s):
+def feature_importance_comparison(X, Y, method_names=None):
+    
+    num_methods = len(X)
     
     n_trees = 1000
+    importances = []
+    stds = []
     
-    forest = ExtraTreesClassifier(n_trees)
-    forest.fit(X, y)
-    importances = forest.feature_importances_
-    std = np.std([tree.feature_importances_ for tree in forest.estimators_],
-                 axis=0)
+    for i in range(num_methods):
+        forest = ExtraTreesClassifier(n_trees)
+        forest.fit(X[i], Y[i])
+        importances.append(forest.feature_importances_)
+        stds.append(np.std([tree.feature_importances_ for tree in forest.estimators_],
+                     axis=0))
+        
+        if method_names is not None and i>0:
+            print(f'Correlation of importances or method {method_names[i-1]}:')
+            print(np.corrcoef(importances[0],importances[i])[0,1])
     
-    forest = ExtraTreesClassifier(n_trees)
-    forest.fit(X_s, y_s)
-    importances_s = forest.feature_importances_
-    std_s = np.std([tree.feature_importances_ for tree in forest.estimators_],
-                 axis=0)
-    
-    print('Correlation of importances:')
-    print(np.corrcoef(importances,importances_s)[0,1])
-    
-    bar_comparison([importances, importances_s], 
-                   [std, std_s], save_name = 'feat_importance')
+    if method_names is not None:
+        bar_comparison(importances, 
+                   stds, labels=method_names, tick_names = X[0].columns, save_name = 'all_feat_importance')
 
-    
+    return [importances, stds]
+
+
+
+
 def cv_predict_scores(X, y, classifier, n_splits=6):
     """
     Computes CV accuracy and AUROC
@@ -176,13 +201,17 @@ def transfer_scores(X, y, X_s, y_s, classifier):
     return acc, auc
     
 
-def predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y, models=None):
+def predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y, method_name=None, models=None):
     if models is None:
-        models = [LogisticRegression(), 
+        models = [LogisticRegression(max_iter=300), 
               KNeighborsClassifier(), 
-              MLPClassifier(max_iter=1000),
-              RandomForestClassifier()]
-        model_names = ['LogReg', 'KNeighbour', 'MLP', 'RandForest']
+              MLPClassifier(max_iter=100),
+              RandomForestClassifier(),
+              SVC(probability=True),
+              GaussianNB()
+              ]
+        model_names = ['Logistic', 'KNeighbour', 'MLP', 'Forest', 'SVM', 
+                       'GaussNB']
     num_models = len(models)
     accs = np.zeros(num_models)
     aucs = np.zeros(num_models)
@@ -228,15 +257,19 @@ def predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y, models=None):
         std_transf_aucs[i] = std_auc              
     
     # plot results
-    plt.close('all')
-    bar_comparison([accs, synth_accs, transf_accs], 
-                   [std_accs, std_synth_accs, std_transf_accs], 
-                   tick_names=model_names, save_name = 'pred_accs')
-    bar_comparison([aucs, synth_aucs, transf_aucs], 
-                   [std_aucs, std_synth_aucs, std_transf_aucs], 
-                   tick_names=model_names, save_name = 'pred_aucs')
-       
-
+    if method_name is not None:
+        bar_comparison([accs, synth_accs, transf_accs], 
+                       [std_accs, std_synth_accs, std_transf_accs], 
+                       tick_names=model_names, save_name = f'{method_name}_pred_accs')
+        bar_comparison([aucs, synth_aucs, transf_aucs], 
+                       [std_aucs, std_synth_aucs, std_transf_aucs], 
+                       tick_names=model_names, save_name = f'{method_name}_pred_aucs')
+        
+    return {'acc':[[accs,synth_accs, transf_accs],
+                   [std_accs,std_synth_accs, std_transf_accs]]
+            ,'auc':[[aucs,synth_aucs, transf_aucs],
+                    [std_aucs,std_synth_aucs, std_transf_aucs]]}
+                
 
     
     
@@ -245,15 +278,16 @@ def predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y, models=None):
 
 #%% Misc
     
-def bar_comparison(vectors, std=None, labels=None, tick_names=None, save_name = None):
+def bar_comparison(vectors, std=None, labels=None, tick_names=None, save_name = None, max_length = 10):
     
     num_bars = len(vectors)
     vector = vectors[0]
     indices = np.argsort(vector)[::-1]
+    indices = indices[:max_length]
     fig, ax = plt.subplots()
     tot_bar_width = 0.7
     width = tot_bar_width/num_bars
-    x = np.arange(len(vector)) 
+    x = np.arange(len(indices)) 
     
     if tick_names is None:
         tick_names = range(len(vector))
@@ -272,12 +306,13 @@ def bar_comparison(vectors, std=None, labels=None, tick_names=None, save_name = 
     ax.set_ylim(bottom=0)
     fig.tight_layout()
     ticks = np.array(tick_names, dtype='object')
+    print(indices,ticks)
     ticks = ticks[indices]
     plt.xticks(x, ticks)
     plt.legend()
-    plt.xlim([-1, len(vector)])
+    plt.xlim([-1, len(indices)])
     if save_name is not None:
-        plt.savefig(f'{visual_dir}/{dataset}_{method}_{save_name}.jpg')
+        plt.savefig(f'{visual_dir}/{dataset}_{save_name}.jpg')
     plt.show()
 
 
@@ -333,120 +368,233 @@ def roc(X, y, classifier, n_splits=6, pos_label = 2):
     return mean_auc, mean_acc    
 
 
+
+
+
 #%%  
 # Set settings:
 dataset = 'covid'
-method = 'vae' #adsgan, wgan, gan, vae
-do_train = True
+#method = 'adsgan' #adsgan, wgan, gan, vae
+
 original_data_dir = 'data/tabular/original'
 synth_data_dir = 'data/tabular/synth'
 visual_dir = 'visualisations'
-debug_train = False
 
-def main():
+
+
+debug_train = False
+debug_metrics = False
+just_metrics = True
+
+#Save synthetic data iff we're training
+# Train generative models
+do_train = False
+save_synth = False
+train_ratio = 0.8
+# just relevant for ADS-GAN
+lambda_ = 1
+
+# Train OneClass representation model
+train_OC = True
+# If train is true, save new model (overwrites old OC model)
+save_OC = False
+ 
+which_metric = [['ID','OC'],['OC']]
+    
+
+
+
+tf.random.set_seed(2021)
+np.random.seed(2021)
+
+
+# OneClass representation model
+OC_params  = dict({"rep_dim": 32, 
+                "num_layers": 2, 
+                "num_hidden": 200, 
+                "activation": "ReLU",
+                "dropout_prob": 0.5, 
+                "dropout_active": False,
+                "LossFn": "SoftBoundary",
+                "lr": 1e-3,
+                "epochs": 5000,
+                "warm_up_epochs" : 10,
+                "train_prop" : 0.8,
+                "weight_decay": 1e-2})   
+
+
+
+OC_hyperparams = dict({"Radius": 1, "nu": 1e-2})
+
+if dataset != 'mnist':
+    methods = ['orig','random','adsgan','wgan','vae']#, 'pategan'] 
+else:
+    
+    
+
+
+
+def main(OC_params, OC_hyperparams):
     plt.close('all')
     
-    #Save synthetic data iff we're training
-    save_synth = do_train
-    
-    filename =  f'{synth_data_dir}/{dataset}_{method}.csv'
-    
-        
-    # parameters for ADS-GAN and Wasserstein distance metrics
-    params = dict()
-    params["lambda"] = 0.1
-    params["iterations"] = 10000
-    params["h_dim"] = 30
-    params["z_dim"] = 10
-    params["mb_size"] = 128
-    params['gen_model_name'] = method
-    
-    if method != 'adsgan':
-        params['lambda'] = 0
-        
-    train_ratio = 0.8
-    
-    # Load data
+    prc_curves = []
+ 
+        # Load data
     if dataset == 'bc':
         orig_data = load_breast_cancer_data()  
     elif dataset == 'covid':
         orig_data = load_covid_data()  
-    
-    orig_train_index = round(len(orig_data)*train_ratio)
-    orig_X, orig_Y = orig_data.drop(columns=['target']), orig_data.target
-    orig_X_train, orig_X_test = orig_X[:orig_train_index], orig_X[orig_train_index:]
-    orig_Y_train, orig_Y_test = orig_Y[:orig_train_index], orig_Y[orig_train_index:]
-    
-    
-    # Synthetic data generation
-    if do_train:
-        if method in ['wgan','gan', 'adsgan']:
-            synth_data = adsgan(orig_data, params)
-        elif method == 'pategan':
-            params_pate = {'n_s': 1, 'batch_size': 128, 
-                 'k': 100, 'epsilon': 100, 'delta': 0.0001, 'lambda': 1}
-            
-        
-            synth_data = pategan(orig_data.to_numpy(), params_pate)  
-        elif method=='vae':
-            synth_data = vae(orig_data, params)
-            
-        if save_synth:
-            pickle.dump((synth_data, params),open(filename,'wb'))
-    
+    elif dataset == 'mnist':
+        orig_data = load_mnist_data('data/mnist/original/testing')
     else:
-        synth_data, params = pickle.load(open(filename,'rb'))
-    
-    if debug_train:
-        return synth_data
-    ## Performance measures from ADS-GAN paper
-    # (1) Feature marginal distributions
-    feat_dist = feature_distribution(orig_data, synth_data)
-    print("Finish computing feature distributions")
-    
-    # (2) Wasserstein Distance (WD)
-    print("Start computing Wasserstein Distance")
-    wd_measure = compute_wd(orig_data, synth_data, params)
-    print("WD measure: " + str(wd_measure))
-    
-    frechet_distance = compute_frechet_distance(orig_data, synth_data)
-    print("Frechet distance: " + str(frechet_distance))
-    
-    # (3) Identifiability 
-    identifiability = compute_identifiability(orig_data, synth_data)
-    print("Identifiability measure: " + str(identifiability))
-    
-    
-    
+        raise ValueError('Not a valid dataset name given')
     
     # Some different data definitions
-    synth_data = pd.DataFrame(synth_data,columns = orig_data.columns)
+    #orig_train_index = round(len(orig_data)*train_ratio)
+    orig_X, orig_Y = orig_data.drop(columns=['target']), orig_data.target
+    # orig_X_train, orig_X_test = orig_X[:orig_train_index], orig_X[orig_train_index:]
+    # orig_Y_train, orig_Y_test = orig_Y[:orig_train_index], orig_Y[orig_train_index:]
     
-    synth_train_index = round(len(synth_data)*train_ratio)
-    synth_X, synth_Y = synth_data.drop(columns=['target']), synth_data.target
-    synth_X_train, synth_X_test = synth_X[:synth_train_index], synth_X[synth_train_index:]
-    synth_Y_train, synth_Y_test = synth_Y[:synth_train_index], synth_Y[synth_train_index:]
+    OC_params['input_dim'] = orig_data.shape[1]
+    OC_filename = f'metrics/OC_model_{dataset}.pkl'    
+    if train_OC or not os.path.exists(OC_filename):
+        print('### Training OC embedding model')
+        
+        if OC_params['rep_dim'] is None:
+            OC_params['rep_dim'] = orig_data.shape[1]
+        # Check center definition !
+        OC_hyperparams['center'] = torch.ones(OC_params['rep_dim'])*10
+        
+        OC_model = OneClassLayer(params=OC_params, 
+                                 hyperparams=OC_hyperparams)
+        OC_model.fit(orig_data.to_numpy(), verbosity=True)
+        if save_OC:
+            pickle.dump((OC_model, OC_params, OC_hyperparams),open(OC_filename,'wb'))
+    else:
+        OC_model,OC_params, OC_hyperparams = pickle.load(open(OC_filename,'rb'))
+        print('### Loaded OC embedding model')
+        print('Parameters:', OC_params)
+        print('Hyperparameters:', OC_hyperparams)
+        
+    # parameters for generative models
+    params = dict()
+    if debug_train: 
+        params['iterations'] = 10
+    else:
+        params["iterations"] = 10000
+    params["h_dim"] = 200
+    params["z_dim"] = 20
+    params["mb_size"] = 128
+    #train_ratio = 0.8
+        
+    all_results = []
+    X = [orig_X]
+    Y = [orig_Y]
     
     
+    for method in methods:
+        print(f'\n============== {method} ==============')
+        filename =  f'{synth_data_dir}/{dataset}_{method}.csv'
+        
+        params['gen_model_name'] = method
+        
+        print('Lambda is ',lambda_)
+        if method != 'adsgan':
+            params['lambda'] = 0
+        else:
+            params["lambda"] = lambda_
+        
     
-    ### predictive performance
+        # Synthetic data generation
+        if method == 'orig':
+            # This is for sanity checking metrics
+            synth_data = orig_data.to_numpy()
+        elif method == 'random':
+            # Also for sanity check
+            synth_data = np.random.uniform(size=orig_data.shape)
+        elif do_train:
+            if method in ['wgan','gan']:
+                synth_data = gan(orig_data, params)
+            elif method == 'adsgan':
+                synth_data = adsgan(orig_data, params)
+            elif method == 'pategan':
+                params_pate = {'n_s': 1, 'batch_size': 128, 
+                     'k': 100, 'epsilon': 100, 'delta': 0.0001, 'lambda': 1}
+                
+            
+                synth_data = pategan(orig_data.to_numpy(), params_pate)  
+            elif method=='vae':
+                synth_data = vae(orig_data, params)
+                
+            if save_synth:
+                pickle.dump((synth_data, params),open(filename,'wb'))
+        
+        else:
+            synth_data, params = pickle.load(open(filename,'rb'))
+        
+        if debug_train:
+            return synth_data
     
-    ## RANKING: 
-    # how ranking (accuracy and AUC) of different models compares
-    # between the synthetic and original dataset
-    plt.close('all')
-    predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y)
+        ## Performance measures from ADS-GAN paper, FID and Parzen
+        if debug_metrics:
+            print('Debugging metrics: only using 100 samples')
+            orig_data = orig_data.loc[:100]
+            synth_data = synth_data[:100]
+        
+        print('#### Computing static metrics')
+        results_metrics = compute_metrics(orig_data.to_numpy(), synth_data, 
+                                          which_metric=which_metric, 
+                                          wd_params = params, model=OC_model)
+        
+        if 'OC' in which_metric[1]:
+            apc = results_metrics['alpha_pc_OC']
+            bcc = results_metrics['beta_cv_OC'] 
+            alpha = results_metrics['alphas']
+            prc_curves.append([alpha, apc])
+        
+        synth_data = pd.DataFrame(synth_data,columns = orig_data.columns)
     
     
-    # example of ROC computation
-    #roc(synth_X, synth_Y, LogisticRegression())
+          
+        synth_X, synth_Y = synth_data.drop(columns=['target']), synth_data.target
+        X.append(synth_X)
+        Y.append(synth_Y)
+        # synth_train_index = round(len(synth_data)*train_ratio)
+        # synth_X_train, synth_X_test = synth_X[:synth_train_index], synth_X[synth_train_index:]
+        # synth_Y_train, synth_Y_test = synth_Y[:synth_train_index], synth_Y[synth_train_index:]
+        
+        
+        ### predictive performance
+        
+        ## RANKING: 
+        # how ranking (accuracy and AUC) of different models compares
+        # between the synthetic and original dataset
+        #plt.close('all')
+        print('#### Computing predictive metrics')
+        
+        if debug_metrics or just_metrics:
+            pred_perf = None
+        else:
+            pred_perf = predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y, method_name=method)
+        
+        # example of ROC computation
+        #roc(synth_X, synth_Y, LogisticRegression())
+        
+        
+        ### Feature importance between orig and synth data
+        all_results.append([results_metrics, pred_perf])
     
-    
-    ### Feature importance between orig and synth data
-    feature_importance_comparison(orig_X, orig_Y, synth_X, synth_Y)
-    
-    return orig_data, synth_data
+    if debug_metrics or debug_train or just_metrics:
+        return all_results
+        
+    feat_imp = feature_importance_comparison(X,Y, method_names=['orig']+methods)
+        
+    if 'OC' in which_metric[1]:
+        prd.plot([prc_curves], out_path=None)
 
+    return all_results
 
 if __name__ == '__main__':
-    orig_data, synth_data = main()
+    #for lambda_ in np.exp(np.arange(-2,4,0.5)):
+    all_results = main(OC_params, OC_hyperparams)
+    #pickle.dump(all_results, open(f'metrics/results{round(time.time())}.pkl','wb'))

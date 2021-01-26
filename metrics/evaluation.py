@@ -24,12 +24,12 @@ if not sys.warnoptions:
     
 
 
-def compute_alpha_precision(real_data, synthetic_data, evaluation_embedding):
+def compute_alpha_precision(real_data, synthetic_data, emb_center):
     
     n_steps = 50
     nn_size = 3
     alphas  = np.linspace(0, 1, 50)
-    Radii   = [np.quantile(torch.sqrt(torch.sum((torch.tensor(real_data).float() - evaluation_embedding.c) ** 2, dim=1)), alphas[k]) for k in range(len(alphas))]
+    Radii   = [np.quantile(torch.sqrt(torch.sum((torch.tensor(real_data).float() - emb_center) ** 2, dim=1)), alphas[k]) for k in range(len(alphas))]
     
     synth_center          = torch.tensor(np.mean(synthetic_data, axis=0)).float()
     synth_Radii           = [np.quantile(torch.sqrt(torch.sum((torch.tensor(synthetic_data).float() - synth_center) ** 2, dim=1)), alphas[k]) for k in range(len(alphas))]
@@ -37,9 +37,9 @@ def compute_alpha_precision(real_data, synthetic_data, evaluation_embedding):
     alpha_precision_curve = []
     beta_coverage_curve   = []
     
-    synth_to_center       = torch.sqrt(torch.sum((torch.tensor(synthetic_data).float() - evaluation_embedding.c) ** 2, dim=1))
+    synth_to_center       = torch.sqrt(torch.sum((torch.tensor(synthetic_data).float() - emb_center) ** 2, dim=1))
     synth_to_synth_center = torch.sqrt(torch.sum((torch.tensor(synthetic_data).float() - synth_center) ** 2, dim=1))
-    real_to_center        = torch.sqrt(torch.sum((torch.tensor(real_data).float() - evaluation_embedding.c) ** 2, dim=1))
+    real_to_center        = torch.sqrt(torch.sum((torch.tensor(real_data).float() - emb_center) ** 2, dim=1))
     
     real_to_synth         = [np.min(np.sum(np.abs(real_data[k, :] - synthetic_data), axis=1)) for k in range(real_data.shape[0])]
     real_to_synth_args    = [np.argmin(np.sum(np.abs(real_data[k, :] - synthetic_data), axis=1)) for k in range(real_data.shape[0])]

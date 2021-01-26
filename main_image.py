@@ -15,13 +15,40 @@ from keras.applications.vgg16 import preprocess_input
 from keras.models import Model
 
 import numpy as np
+import torch
+import pickle
+import matplotlib.pyplot as plt
 
-from metrics.feature_distribution import feature_distribution
-from metrics.compute_wd_v2 import compute_wd
-from metrics.compute_identifiability import compute_identifiability
-from metrics.fid import calculate_frechet_distance, fit_gaussian
+from representations.OneClass import OneClassLayer
+from metrics.combined import compute_metrics
+
 
 from PIL import Image
+
+tf.config.run_functions_eagerly(True)
+
+
+#%%
+
+
+OC_params  = dict({"rep_dim": 100, 
+                "num_layers": 2, 
+                "num_hidden": 200, 
+                "activation": "ReLU",
+                "dropout_prob": 0.5, 
+                "dropout_active": False,
+                "LossFn": "SoftBoundary",
+                "lr": 1e-3,
+                "epochs": 500,
+                "warm_up_epochs" : 10,
+                "train_prop" : 0.8,
+                "weight_decay": 1e-2}   
+)   
+
+OC_hyperparams = dict({"Radius": 1, "nu": 1e-2})
+
+which_metric = [['OC','PRDC','ID'],['OC']]
+
 
 
 #%%
@@ -54,7 +81,6 @@ def load_embedder(embedding):
     if embedding['model'] == 'vgg16' or embedding['model'] == 'vgg':
         model = tf.keras.applications.VGG16(include_top = True, weights='imagenet')
         model = remove_layer(model)
-        model = model
         model.trainable = False
     
         
@@ -62,11 +88,6 @@ def load_embedder(embedding):
         model = tf.keras.applications.InceptionV3(include_top = True, weights='imagenet')
         model = remove_layer(model)
         model.trainable = False
-    
-    else:
-        print('Did not recognise name of embedding model. Using identity embedding instead')
-        model = identity_flatten
-    
     
     if embedding['randomise']:
         model = reset_weights(model)
@@ -77,7 +98,32 @@ def load_embedder(embedding):
             hidden_layer = tf.keras.layers.Dense(64)(model.layers[-2].output)
             model = Model(new_input, hidden_layer)   
     
+    #model.eval()
     return model
+
+def plot_all(x, res, x_axis, metric_keys=None):
+    """ Plots results of experiment with varying mode drop/authenticity"""
+    if type(res) == type([]):
+        plot_legend = False
+        res = {'0':res}
+    else:
+        plot_legend = True
+    exp_keys = list(res.keys())
+    
+    if metric_keys is None:
+        metric_keys = res[exp_keys[0]][0].keys() 
+    
+    for m_key in metric_keys:
+        for e_key in exp_keys:
+          y = [res[e_key][i][m_key] for i in range(len(x))]
+          plt.plot(x, y, label=e_key)
+        plt.ylabel(m_key)
+        plt.ylim(bottom=0)
+        plt.xlabel(x_axis) 
+        if plot_legend:
+            plt.legend()
+        plt.show()
+
 
 #%% load data and conpute activations
 
@@ -154,9 +200,8 @@ def get_activations_from_files(files, embedder, batch_size=None, verbose=False):
         
  
         batch = load_image_batch(files[start:end], input_shape)
-        
         pred = embedder(batch)
-        pred_arr[start:end] = pred.numpy()
+        pred_arr[start:end] = pred
         del batch #clean up memory
         
     if verbose:
@@ -165,95 +210,187 @@ def get_activations_from_files(files, embedder, batch_size=None, verbose=False):
     return pred_arr
 
     
+#%% MNIST imbalance experiment
+
+def get_activation(path, embedding, embedder=None, verbose=True):
+# Check if folder exists
+    if not os.path.exists(path):
+        raise RuntimeError("Invalid path: %s" % path)
+    # Don't embed data if no embedding is given 
+    if embedding is None:
+        files = list(glob.glob(os.path.join(path,'**/*.jpg'),recursive=True)) + list(glob.glob(os.path.join(path,'**/*.png'),recursive=True)) 
+        act = load_all_images(files)    
+
+    else:
+        act_filename = f'{path}/act_{embedding["model"]}_{embedding["dim64"]}_{embedding["randomise"]}'
+        # Check if embeddings are already available
+        if load_act and os.path.exists(f'{act_filename}.npz'):
+            print('Loaded activations from', act_filename)
+            print(act_filename)
+            data = np.load(f'{act_filename}.npz',allow_pickle=True)
+            act, _ = data['act'], data['embedding']
+        # Otherwise compute embeddings
+        else:
+            if load_act:
+                print('Could not find activation file', act_filename)
+            print('Calculating activations')
+            files = list(glob.glob(os.path.join(path,'**/*.jpg'),recursive=True)) + list(glob.glob(os.path.join(path,'**/*.png'),recursive=True)) 
+            act = get_activations_from_files(files, embedder, batch_size=64*8, verbose=verbose)
+            # Save embeddings
+            if save_act:
+                np.savez(f'{act_filename}', act=act,embedding=embedding)
+    return act
+
+def activation_loader_per_class(path_set, embedding = None, verbose = False):
+    print('#### Embedding info',embedding, '#####')
+    activations = []
+    # Load embedder function
+    if embedding is not None:
+        embedder = load_embedder(embedding)
+
+    # Check if folder exists
+    for label in range(10):
+        path = os.path.join(path_set,str(label))
+        act = get_activation(path, embedding, embedder, True)
+        
+        activations.append(act)
+            
+    return activations
+
+
+def experiments(paths, embedding, OC_params, OC_hyperparams):
+    
+    #activations = activation_loader_per_class(paths, embedding)
+    # random assignment
+    path = paths[0]
+    
+    X = get_activation(path, embedding)
+    
+    Y_per_class = activation_loader_per_class(paths[1],embedding)
+    Y_zero = Y_per_class[0]
+    num_per_class = len(Y_per_class[1])
+    
+    Y_other = np.concatenate(Y_per_class[1:],axis=0)
+    step_size = 0.04
+    
+    # Train OC model
+    OC_filename = f'metrics/OC_model_{dataset}_{embedding["model"]}_{embedding["dim64"]}.pkl' 
+            
+    OC_filename = f'metrics/OC_model_{dataset}_{embedding["model"]}_{embedding["dim64"]}.pkl' 
+    OC_model, OC_params, OC_hyperparams = get_OC_model(OC_filename, train_OC, X, OC_params, OC_hyperparams)
+            
+    
+    #simultaneous dropping
+    p_mode_drops = np.arange(0,1+step_size,step_size)
+    
+
+    res_sim = []
+    res_seq = []
+    
+    for p_mode_drop in p_mode_drops:
+        mode_drop = np.random.rand(len(Y_other))<p_mode_drop
+        Y_A = Y_zero[:num_per_class+np.sum(mode_drop)]
+        Y_B = Y_other[1-mode_drop]
+        Y = np.concatenate((Y_A, Y_B), axis=0)
+        res = compute_metrics(X, Y, which_metric, model = OC_model)
+        res_sim.append(res)
+ 
+    # sequential dropping    
+    for p_mode_drop in p_mode_drops:
+        n_mode_drop = np.sum(np.random.rand(len(Y_other))<p_mode_drop)
+        Y_A = Y_zero[:num_per_class+n_mode_drop]
+        Y_B = Y_other[:-n_mode_drop]
+        Y = np.concatenate(Y_A, Y_B, axis=0)
+        res = compute_metrics(X, Y, which_metric, model = OC_model)
+        res_seq.append(res)
+    
+    
+    res = {}
+    res['Simultaneous'] = res_sim
+    res['Sequential'] = res_seq
+    plot_all(p_mode_drops, res, r'p')
+    
+    
+    # Copied proportion
+    step_size = 0.1
+    p_copied = np.arange(0,1+step_size,step_size)
+    
+    res = []
+
+    for p in p_copied:
+        c = int(p*len(X))
+        Y_p = np.concatenate((X[:c],Y[c:]),axis=0)
+        res_ = compute_metrics(X, Y_p, model=OC_model)
+        res.append(res_)    
+        
+    plot_all(p_copied, res, r'$p_{copied}$') 
+    
+
+
+    
+
+
+
 
 
 #%% main
+def get_OC_model(OC_filename, train_OC, X=None, OC_params=None, OC_hyperparams=None):
+    if train_OC or not os.path.exists(OC_filename):
+        
+        OC_params['input_dim'] = X.shape[1]
 
-def main(paths, embedding, load_act=True, save_act=True, verbose = False):
+        if OC_params['rep_dim'] is None:
+            OC_params['rep_dim'] = X.shape[1]
+        # Check center definition !
+        OC_hyperparams['center'] = torch.ones(OC_params['rep_dim'])
+        
+        OC_model = OneClassLayer(params=OC_params, 
+                                 hyperparams=OC_hyperparams)
+        OC_model.fit(X,verbosity=True)
+        if save_OC:
+            pickle.dump((OC_model, OC_params, OC_hyperparams),open(OC_filename,'wb'))
+    
+    else:
+        OC_model, OC_params, OC_hyperparams = pickle.load(open(OC_filename,'rb'))
+    
+    print(OC_params)
+    print(OC_hyperparams)
+    OC_model.eval()
+
+
+def main(paths, embedding, OC_params, OC_hyperparams, load_act=True, save_act=True,  verbose = False):
     ''' Calculates the FID of two paths. '''
     
     print('#### Embedding info',embedding, '#####')
     activations = []
-    m = []
-    s = []
-    fid_values = {}
+    results = []
     # Load embedder function
     if embedding is not None:
         embedder = load_embedder(embedding)
-    
+
     # Loop through datasets
     for path_index, path in enumerate(paths):
         print('============ Path', path, '============')
-        # Check if folder exists
-        if not os.path.exists(path):
-            raise RuntimeError("Invalid path: %s" % path)
-        # Don't embed data if no embedding is given 
-        if embedding is None:
-            files = list(glob.glob(os.path.join(path,'**/*.jpg'),recursive=True)) + list(glob.glob(os.path.join(path,'**/*.png'),recursive=True)) 
-            act = load_all_images(files)    
-    
-        else:
-            act_filename = f'{path}/act_{embedding["model"]}_{embedding["dim64"]}_{embedding["randomise"]}'
-            # Check if embeddings are already available
-            if load_act and os.path.exists(f'{act_filename}.npz'):
-                print('Loaded activations from', act_filename)
-                data = np.load(f'{act_filename}.npz',allow_pickle=True)
-                act, _ = data['act'], data['embedding']
-            # Otherwise compute embeddings
-            else:
-                if load_act:
-                    print('Could not find activation file', act_filename)
-                print('Calculating activations')
-                files = list(glob.glob(os.path.join(path,'**/*.jpg'),recursive=True)) + list(glob.glob(os.path.join(path,'**/*.png'),recursive=True)) 
-                act = get_activations_from_files(files, embedder, batch_size=64*8, verbose=verbose)
-                
-                # Save embeddings
-                if save_act:
-                    np.savez(f'{act_filename}', act=act,embedding=embedding)
-                    
-        
+        act = get_activation(path, embedding, embedder=embedder, verbose=True)
+            
         activations.append(act)            
-    
         
-        # Frechet distance statistics
-        m_i, s_i = fit_gaussian(act)
-        m.append(m_i)
-        s.append(s_i)
+        # compute metrics
+        if path_index == 0:
+            OC_filename = f'metrics/OC_model_{dataset}_{embedding["model"]}_{embedding["dim64"]}.pkl' 
+            OC_model, OC_params, OC_hyperparams = get_OC_model(OC_filename, train_OC, act, OC_params, OC_hyperparams)
+            print(OC_params)
+            print(OC_hyperparams)
+            OC_model.eval()
+            
+        else:
+            results.append([compute_metrics(activations[0], act, model=OC_model), path])
         
-        if path_index!=0:
-            # (0) Frechet distance
-            fid_value = calculate_frechet_distance(m[0],s[0],m[path_index],s[path_index])
-            fid_values[path_index] = fid_value
-            print('Frechet distance', fid_value)
-            print('Frechet distance/dim', fid_value/act.shape[-1])
-            
-            # (1) Marginal distributions
-            #print("Start computing marginal feature distributions")
-            #feat_dist = feature_distribution(activations[0], act)
-            #print("Finish computing feature distributions")
-            #print(feat_dist)
-            
-            # (2) Wasserstein Distance (WD)
-            print("Start computing Wasserstein Distance")
-            params = dict()
-            params["iterations"] = 10000
-            params["h_dim"] = 30
-            params["z_dim"] = 10
-            params["mb_size"] = 128
-            
-            wd_measure = compute_wd(activations[0], act, params)
-            print("WD measure: " + str(wd_measure))
-            
-            
-            # (3) Identifiability 
-            print("Start computing identifiability")
-            identifiability = compute_identifiability(activations[0], act)
-            print("Identifiability measure: " + str(identifiability))
         
-    return activations, fid_values
+    return results
 
 
-
+#%%
 
 if __name__ == '__main__':
     os.environ['CUDA_VISIBLE_DEVICES'] = '0'
@@ -261,12 +398,20 @@ if __name__ == '__main__':
     #for embed in ['inceptionv3','vgg','identity']:
     methods = ['WGAN-GP','DCGAN','VAE','CGAN', 'ADS-GAN']
     load_act = True
-    save_act = True
+    save_act = False
     nul_path = ['data/mnist/original/testing']
+    conditional_path = ['data/mnist/cgan_exp']
+    random_path = ['data/mnist/random']
     other_paths = [f'data/mnist/synth/{method}' for method in methods]
-    paths = nul_path + other_paths
+    paths = random_path # nul_path + random_path + other_paths
+    
+    dataset = 'MNIST'
+    train_OC = False
+    save_OC= True
+    
+    #embeddings.append(None)
     embeddings = []
-#    embeddings.append(None)
+    
     embeddings.append({'model':'inceptionv3',
                  'randomise': False, 'dim64': False})
     embeddings.append({'model':'vgg16',
@@ -274,10 +419,12 @@ if __name__ == '__main__':
     embeddings.append({'model':'vgg16',
                  'randomise': True, 'dim64': False})
     embeddings.append({'model':'vgg16',
-                 'randomise': True, 'dim64': True})
+                'randomise': True, 'dim64': True})
     
-        
-    for embedding in embeddings:
-        output = main(paths, embedding, load_act, save_act,verbose=True)
-        activations, fid_values = output
+    outputs = []
+    experiments(nul_path+conditional_path, embeddings[0], OC_params, OC_hyperparams)
+    #for embedding in embeddings:
+
+            #output = main(paths, embedding, OC_params, OC_hyperparams, load_act, save_act,verbose=True)
+            #outputs.append(output)
     

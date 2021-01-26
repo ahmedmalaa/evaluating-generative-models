@@ -16,6 +16,7 @@ import numpy as np
 import sys
 
 import logging
+import torch
 import torch.nn as nn
 
 if not sys.warnoptions:
@@ -24,6 +25,7 @@ if not sys.warnoptions:
     
 from representations.networks import *  
 
+from torch.autograd import Variable
 
 # One-class loss functions
 # ------------------------
@@ -97,7 +99,7 @@ class OneClassLayer(BaseNet):
         super().__init__()
         
         # set all representation parameters - remove these lines
-
+        
         self.rep_dim        = params["rep_dim"] 
         self.input_dim      = params["input_dim"]
         self.num_layers     = params["num_layers"]
@@ -106,7 +108,11 @@ class OneClassLayer(BaseNet):
         self.dropout_prob   = params["dropout_prob"]
         self.dropout_active = params["dropout_active"]  
         self.loss_type      = params["LossFn"]
-        
+        self.train_prop     = params['train_prop']
+        self.learningRate   = params['lr']
+        self.epochs         = params['epochs']
+        self.warm_up_epochs = params['warm_up_epochs']
+        self.weight_decay   = params['weight_decay']
         self.device         = torch.device('cpu') # Make this an option
         
         # set up the network
@@ -129,14 +135,24 @@ class OneClassLayer(BaseNet):
         return x
     
     
-    def fit(self, x_train, learningRate=0.01, epochs=100, warm_up_epochs=10, verbosity=True):
+    def fit(self, x_train, verbosity=True):
         
-        self.epochs         = epochs
-        self.learningRate   = learningRate         
-        self.optimizer      = torch.optim.Adam(self.model.parameters(), lr=self.learningRate)
         
+        self.optimizer      = torch.optim.AdamW(self.model.parameters(), lr=self.learningRate, weight_decay = self.weight_decay)
         self.X              = torch.tensor(x_train.reshape((-1, self.input_dim))).float()
+        
+        if self.train_prop != 1:
+            x_train, x_val = x_train[:int(self.train_prop*len(x_train))], x_train[int(self.train_prop*len(x_train)):]
+            if torch.cuda.is_available():
+                inputs_val = Variable(torch.from_numpy(x_val).cuda()).float()
+            
+            else:
+                inputs_val = Variable(torch.from_numpy(x_val)).float()
+            
+        
         self.losses         = []
+        self.loss_vals       = []
+                
         
         for epoch in range(self.epochs):
             
@@ -167,14 +183,7 @@ class OneClassLayer(BaseNet):
                 
                 self.loss = self.loss_fn(outputs=outputs, c=self.c) 
             
-            l2_lambda = .5
-            l2_reg    = torch.tensor(0.)
             
-            for param in self.model.parameters():
-                
-                l2_reg += torch.norm(param)  
-            
-            self.loss = self.loss + l2_lambda * l2_reg 
             #self.c    = torch.mean(torch.tensor(outputs).float(), dim=0)
             
             # get gradients w.r.t to parameters
@@ -184,12 +193,36 @@ class OneClassLayer(BaseNet):
             # update parameters
             self.optimizer.step()
             
-            if (epoch >= warm_up_epochs) and (self.loss_type=="SoftBoundary"):
+            if (epoch >= self.warm_up_epochs) and (self.loss_type=="SoftBoundary"):
                 
                 dist   = torch.sum((outputs - self.c) ** 2, dim=1)
                 #self.R = torch.tensor(get_radius(dist, self.nu))
             
-
+            if self.train_prop != 1.0:
+                with torch.no_grad():
+                    
+                    # get output from the model, given the inputs
+                    outputs = self.model(inputs_val)
+        
+                    # get loss for the predicted output
+                    
+                    if self.loss_type=="SoftBoundary":
+                        
+                        loss_val = self.loss_fn(outputs=outputs, R=self.R, c=self.c, nu=self.nu) 
+                        
+                    elif self.loss_type=="OneClass":
+                        
+                        loss_val = self.loss_fn(outputs=outputs, c=self.c).item()
+                    
+                    self.loss_vals.append(loss_val)
+                                        
+                
+                
+            
             if verbosity:
-
-                print('epoch {}, loss {}'.format(epoch, self.loss.item()))
+                if self.train_prop == 1:
+                    print('epoch {}, loss {}'.format(epoch, self.loss.item()))
+                else:
+                    print('epoch {:4}, train loss {:.4e}, val loss {:.4e}'.format(epoch, self.loss.item(),loss_val))
+                    
+                
