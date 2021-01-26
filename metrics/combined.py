@@ -37,8 +37,8 @@ def compute_metrics(X, Y, which_metric=None, wd_params=None, model=None):
         wd_params['mb_size'] = 128
     
     if which_metric is None:
-            which_metric = [['WD','ID','FD', 'PRDC'], # normal
-                            ['OC']]                   # additional OneClass
+            which_metric = [['WD','ID','FD', 'PRDC', 'OC'], # normal
+                            ['WD','ID','FD', 'PRDC', 'OC']]                   # additional OneClass
             
     for emb_index, emb in enumerate(emb_types):
         
@@ -47,6 +47,9 @@ def compute_metrics(X, Y, which_metric=None, wd_params=None, model=None):
             with torch.no_grad():
                 X = model(torch.tensor(X).float()).detach().numpy()
                 Y = model(torch.tensor(Y).float()).detach().numpy()
+            print('X, std X', np.mean(X), np.std(X))
+            print('Y, std Y', np.mean(Y), np.std(Y))
+            print(X.shape, Y.shape)
         else:
             print('Computing metrics for no additional OneClass embedding')
     
@@ -91,7 +94,7 @@ def compute_metrics(X, Y, which_metric=None, wd_params=None, model=None):
         # (6) Precision/Recall
         if 'PR' in which_metric[emb_index]:
             results[f'PR{emb}'] = compute_prc(X,Y)
-        elif 'PRDC' in which_metric:
+        elif 'PRDC' in which_metric[emb_index]:
             print('Start computing P&R and D&C')
             prdc_res = compute_prdc(X,Y)
             for key in prdc_res:
