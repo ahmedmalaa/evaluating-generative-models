@@ -211,10 +211,39 @@ def get_activations_from_files(files, embedder, batch_size=None, verbose=False):
 
     
 #%% MNIST imbalance experiment
-def activation_loader_per_class(path_set, embedding, verbose = False):
+
+def get_activation(path, embedding, embedder=None, verbose=True):
+# Check if folder exists
+    if not os.path.exists(path):
+        raise RuntimeError("Invalid path: %s" % path)
+    # Don't embed data if no embedding is given 
+    if embedding is None:
+        files = list(glob.glob(os.path.join(path,'**/*.jpg'),recursive=True)) + list(glob.glob(os.path.join(path,'**/*.png'),recursive=True)) 
+        act = load_all_images(files)    
+
+    else:
+        act_filename = f'{path}/act_{embedding["model"]}_{embedding["dim64"]}_{embedding["randomise"]}'
+        # Check if embeddings are already available
+        if load_act and os.path.exists(f'{act_filename}.npz'):
+            print('Loaded activations from', act_filename)
+            print(act_filename)
+            data = np.load(f'{act_filename}.npz',allow_pickle=True)
+            act, _ = data['act'], data['embedding']
+        # Otherwise compute embeddings
+        else:
+            if load_act:
+                print('Could not find activation file', act_filename)
+            print('Calculating activations')
+            files = list(glob.glob(os.path.join(path,'**/*.jpg'),recursive=True)) + list(glob.glob(os.path.join(path,'**/*.png'),recursive=True)) 
+            act = get_activations_from_files(files, embedder, batch_size=64*8, verbose=verbose)
+            # Save embeddings
+            if save_act:
+                np.savez(f'{act_filename}', act=act,embedding=embedding)
+    return act
+
+def activation_loader_per_class(path_set, embedding = None, verbose = False):
     print('#### Embedding info',embedding, '#####')
     activations = []
-    results = []
     # Load embedder function
     if embedding is not None:
         embedder = load_embedder(embedding)
@@ -222,44 +251,20 @@ def activation_loader_per_class(path_set, embedding, verbose = False):
     # Check if folder exists
     for label in range(10):
         path = os.path.join(path_set,str(label))
-        if not os.path.exists(path):
-            raise RuntimeError("Invalid path: %s" % path)
-        # Don't embed data if no embedding is given 
-        if embedding is None:
-            files = list(glob.glob(os.path.join(path,'**/*.jpg'),recursive=True)) + list(glob.glob(os.path.join(path,'**/*.png'),recursive=True)) 
-            act = load_all_images(files)    
-    
-        else:
-            act_filename = f'{path}/act_{embedding["model"]}_{embedding["dim64"]}_{embedding["randomise"]}'
-            # Check if embeddings are already available
-            if load_act and os.path.exists(f'{act_filename}.npz'):
-                print('Loaded activations from', act_filename)
-                data = np.load(f'{act_filename}.npz',allow_pickle=True)
-                act, _ = data['act'], data['embedding']
-            # Otherwise compute embeddings
-            else:
-                if load_act:
-                    print('Could not find activation file', act_filename)
-                print('Calculating activations')
-                files = list(glob.glob(os.path.join(path,'**/*.jpg'),recursive=True)) + list(glob.glob(os.path.join(path,'**/*.png'),recursive=True)) 
-                act = get_activations_from_files(files, embedder, batch_size=64*8, verbose=verbose)
-                # Save embeddings
-                if save_act:
-                    np.savez(f'{act_filename}', act=act,embedding=embedding)
+        act = get_activation(path, embedding, embedder, True)
         
         activations.append(act)
             
     return activations
+
 
 def experiments(paths, embedding, OC_params, OC_hyperparams):
     
     #activations = activation_loader_per_class(paths, embedding)
     # random assignment
     path = paths[0]
-    act_filename = f'{path}/act_{embedding["model"]}_{embedding["dim64"]}_{embedding["randomise"]}'
-    print('Loading original data activations from', act_filename)
-    data = np.load(f'{act_filename}.npz',allow_pickle=True)
-    X = data['act']
+    
+    X = get_activation(path, embedding)
     
     Y_per_class = activation_loader_per_class(paths[1],embedding)
     Y_zero = Y_per_class[0]
@@ -271,21 +276,9 @@ def experiments(paths, embedding, OC_params, OC_hyperparams):
     # Train OC model
     OC_filename = f'metrics/OC_model_{dataset}_{embedding["model"]}_{embedding["dim64"]}.pkl' 
             
-    if train_OC:
-        OC_params['input_dim'] = X.shape[1]
-        if OC_params['rep_dim'] is None:
-            OC_params['rep_dim'] = X.shape[1]
-        # Check center definition !
-        OC_hyperparams['center'] = torch.ones(OC_params['rep_dim'])*10
-        
-        OC_model = OneClassLayer(params=OC_params, 
-                                 hyperparams=OC_hyperparams)
-        OC_model.fit(X,verbosity=True)
-        if save_OC:
-            pickle.dump((OC_model, OC_params, OC_hyperparams),open(OC_filename,'wb'))
-    else:
-        OC_model, OC_params, OC_hyperparams = pickle.load(open(OC_filename,'rb'))
-    
+    OC_filename = f'metrics/OC_model_{dataset}_{embedding["model"]}_{embedding["dim64"]}.pkl' 
+    OC_model, OC_params, OC_hyperparams = get_OC_model(OC_filename, train_OC, X, OC_params, OC_hyperparams)
+            
     
     #simultaneous dropping
     p_mode_drops = np.arange(0,1+step_size,step_size)
@@ -333,7 +326,7 @@ def experiments(paths, embedding, OC_params, OC_hyperparams):
     plot_all(p_copied, res, r'$p_{copied}$') 
     
 
-    
+
     
 
 
@@ -341,6 +334,29 @@ def experiments(paths, embedding, OC_params, OC_hyperparams):
 
 
 #%% main
+def get_OC_model(OC_filename, train_OC, X=None, OC_params=None, OC_hyperparams=None):
+    if train_OC or not os.path.exists(OC_filename):
+        
+        OC_params['input_dim'] = X.shape[1]
+
+        if OC_params['rep_dim'] is None:
+            OC_params['rep_dim'] = X.shape[1]
+        # Check center definition !
+        OC_hyperparams['center'] = torch.ones(OC_params['rep_dim'])
+        
+        OC_model = OneClassLayer(params=OC_params, 
+                                 hyperparams=OC_hyperparams)
+        OC_model.fit(X,verbosity=True)
+        if save_OC:
+            pickle.dump((OC_model, OC_params, OC_hyperparams),open(OC_filename,'wb'))
+    
+    else:
+        OC_model, OC_params, OC_hyperparams = pickle.load(open(OC_filename,'rb'))
+    
+    print(OC_params)
+    print(OC_hyperparams)
+    OC_model.eval()
+
 
 def main(paths, embedding, OC_params, OC_hyperparams, load_act=True, save_act=True,  verbose = False):
     ''' Calculates the FID of two paths. '''
@@ -355,57 +371,14 @@ def main(paths, embedding, OC_params, OC_hyperparams, load_act=True, save_act=Tr
     # Loop through datasets
     for path_index, path in enumerate(paths):
         print('============ Path', path, '============')
-        # Check if folder exists
-        if not os.path.exists(path):
-            raise RuntimeError("Invalid path: %s" % path)
-        # Don't embed data if no embedding is given 
-        if embedding is None:
-            files = list(glob.glob(os.path.join(path,'**/*.jpg'),recursive=True)) + list(glob.glob(os.path.join(path,'**/*.png'),recursive=True)) 
-            act = load_all_images(files)    
-    
-        else:
-            act_filename = f'{path}/act_{embedding["model"]}_{embedding["dim64"]}_{embedding["randomise"]}'
-            # Check if embeddings are already available
-            if load_act and os.path.exists(f'{act_filename}.npz'):
-                print('Loaded activations from', act_filename)
-                print(act_filename)
-                data = np.load(f'{act_filename}.npz',allow_pickle=True)
-                act, _ = data['act'], data['embedding']
-            # Otherwise compute embeddings
-            else:
-                if load_act:
-                    print('Could not find activation file', act_filename)
-                print('Calculating activations')
-                files = list(glob.glob(os.path.join(path,'**/*.jpg'),recursive=True)) + list(glob.glob(os.path.join(path,'**/*.png'),recursive=True)) 
-                act = get_activations_from_files(files, embedder, batch_size=64*8, verbose=verbose)
-                # Save embeddings
-                if save_act:
-                    np.savez(f'{act_filename}', act=act,embedding=embedding)
-                    
+        act = get_activation(path, embedding, embedder=embedder, verbose=True)
+            
         activations.append(act)            
         
         # compute metrics
         if path_index == 0:
             OC_filename = f'metrics/OC_model_{dataset}_{embedding["model"]}_{embedding["dim64"]}.pkl' 
-            
-            if train_OC:
-                
-                OC_params['input_dim'] = act.shape[1]
-    
-                if OC_params['rep_dim'] is None:
-                    OC_params['rep_dim'] = act.shape[1]
-                # Check center definition !
-                OC_hyperparams['center'] = torch.ones(OC_params['rep_dim'])
-                
-                OC_model = OneClassLayer(params=OC_params, 
-                                         hyperparams=OC_hyperparams)
-                OC_model.fit(act,verbosity=True)
-                if save_OC:
-                    pickle.dump((OC_model, OC_params, OC_hyperparams),open(OC_filename,'wb'))
-            
-            else:
-                OC_model, OC_params, OC_hyperparams = pickle.load(open(OC_filename,'rb'))
-            
+            OC_model, OC_params, OC_hyperparams = get_OC_model(OC_filename, train_OC, act, OC_params, OC_hyperparams)
             print(OC_params)
             print(OC_hyperparams)
             OC_model.eval()
@@ -443,13 +416,13 @@ if __name__ == '__main__':
                  'randomise': False, 'dim64': False})
     embeddings.append({'model':'vgg16',
                  'randomise': False, 'dim64': False})
-    #embeddings.append({'model':'vgg16',
-    #             'randomise': True, 'dim64': False})
+    embeddings.append({'model':'vgg16',
+                 'randomise': True, 'dim64': False})
     embeddings.append({'model':'vgg16',
                 'randomise': True, 'dim64': True})
     
     outputs = []
-    experiments(nul_path+conditional_path, embeddings[2], OC_params, OC_hyperparams)
+    experiments(nul_path+conditional_path, embeddings[0], OC_params, OC_hyperparams)
     #for embedding in embeddings:
 
             #output = main(paths, embedding, OC_params, OC_hyperparams, load_act, save_act,verbose=True)
