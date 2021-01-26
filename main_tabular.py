@@ -21,6 +21,7 @@ import pandas as pd
 import numpy as np
 import torch
 import tensorflow as tf
+import os
 
 import pickle
 import time
@@ -39,7 +40,7 @@ from generative_models.vae import vae
 
 from metrics.combined import compute_metrics
 import metrics.prd_score as prd
-import metrics.prdc as compute_prdc
+from main_image import get_activation
 
 
 #%% Data loading
@@ -65,6 +66,18 @@ def load_covid_data():
     df = pd.DataFrame(X,columns = df.columns)
     return df
 
+def load_mnist_data(path, embedding_no=3):
+    embeddings = []
+    embeddings.append({'model':'inceptionv3',
+                 'randomise': False, 'dim64': False})
+    embeddings.append({'model':'vgg16',
+                 'randomise': False, 'dim64': False})
+    embeddings.append({'model':'vgg16',
+                 'randomise': True, 'dim64': False})
+    embeddings.append({'model':'vgg16',
+                'randomise': True, 'dim64': True})
+    return get_activation(path, 
+                          embedding=embeddings[embedding_no]) 
     
 
 #%% Feature importance plots
@@ -375,9 +388,11 @@ just_metrics = True
 
 #Save synthetic data iff we're training
 # Train generative models
-do_train = True
+do_train = False
 save_synth = False
 train_ratio = 0.8
+# just relevant for ADS-GAN
+lambda_ = 1
 
 # Train OneClass representation model
 train_OC = True
@@ -411,7 +426,12 @@ OC_params  = dict({"rep_dim": 32,
 
 OC_hyperparams = dict({"Radius": 1, "nu": 1e-2})
 
-methods = ['orig','random','adsgan','wgan','vae']#, 'pategan'] 
+if dataset != 'mnist':
+    methods = ['orig','random','adsgan','wgan','vae']#, 'pategan'] 
+else:
+    
+    
+
 
 
 def main(OC_params, OC_hyperparams):
@@ -424,6 +444,8 @@ def main(OC_params, OC_hyperparams):
         orig_data = load_breast_cancer_data()  
     elif dataset == 'covid':
         orig_data = load_covid_data()  
+    elif dataset == 'mnist':
+        orig_data = load_mnist_data('data/mnist/original/testing')
     else:
         raise ValueError('Not a valid dataset name given')
     
@@ -435,8 +457,9 @@ def main(OC_params, OC_hyperparams):
     
     OC_params['input_dim'] = orig_data.shape[1]
     OC_filename = f'metrics/OC_model_{dataset}.pkl'    
-    if train_OC:
+    if train_OC or not os.path.exists(OC_filename):
         print('### Training OC embedding model')
+        
         if OC_params['rep_dim'] is None:
             OC_params['rep_dim'] = orig_data.shape[1]
         # Check center definition !
@@ -573,6 +596,5 @@ def main(OC_params, OC_hyperparams):
 
 if __name__ == '__main__':
     #for lambda_ in np.exp(np.arange(-2,4,0.5)):
-    lambda_ = 1
     all_results = main(OC_params, OC_hyperparams)
     #pickle.dump(all_results, open(f'metrics/results{round(time.time())}.pkl','wb'))
