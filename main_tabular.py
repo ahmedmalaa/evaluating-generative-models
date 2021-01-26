@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import torch
+import tensorflow as tf
 
 import pickle
 import time
@@ -366,54 +367,54 @@ original_data_dir = 'data/tabular/original'
 synth_data_dir = 'data/tabular/synth'
 visual_dir = 'visualisations'
 
-# Train generative models
-do_train = False
 
 
 debug_train = False
-debug_OC = True
-debug_metrics = True
-if debug_OC:
-    debug_metrics = True
+debug_metrics = False
+just_metrics = True
 
+#Save synthetic data iff we're training
+# Train generative models
+do_train = True
+save_synth = False
+train_ratio = 0.8
 
 # Train OneClass representation model
 train_OC = True
 # If train is true, save new model (overwrites old OC model)
 save_OC = False
  
-if debug_OC:
-    which_metric = [['OC'],['OC']]
-elif debug_metrics:
-    which_metric = ['']
-
-else:
-    which_metric = None
+which_metric = [['ID','OC'],['OC']]
     
-#Save synthetic data iff we're training
-save_synth = do_train
-train_ratio = 0.8
+
+
+
+tf.random.set_seed(2021)
+np.random.seed(2021)
+
 
 # OneClass representation model
 OC_params  = dict({"rep_dim": 32, 
                 "num_layers": 2, 
-                "num_hidden": 100, 
+                "num_hidden": 200, 
                 "activation": "ReLU",
                 "dropout_prob": 0.5, 
                 "dropout_active": False,
                 "LossFn": "SoftBoundary",
                 "lr": 1e-3,
-                "epochs": 2000,
+                "epochs": 5000,
                 "warm_up_epochs" : 10,
                 "train_prop" : 0.8,
                 "weight_decay": 1e-2})   
 
+
+
 OC_hyperparams = dict({"Radius": 1, "nu": 1e-2})
 
-methods = ['orig','random','vae','gan','wgan','adsgan']#, 'pategan'] 
-    
+methods = ['orig','random','adsgan','wgan','vae']#, 'pategan'] 
 
-def main():
+
+def main(OC_params, OC_hyperparams):
     plt.close('all')
     
     prc_curves = []
@@ -432,14 +433,14 @@ def main():
     # orig_X_train, orig_X_test = orig_X[:orig_train_index], orig_X[orig_train_index:]
     # orig_Y_train, orig_Y_test = orig_Y[:orig_train_index], orig_Y[orig_train_index:]
     
-    print('### Training OC embedding model')
     OC_params['input_dim'] = orig_data.shape[1]
     OC_filename = f'metrics/OC_model_{dataset}.pkl'    
     if train_OC:
+        print('### Training OC embedding model')
         if OC_params['rep_dim'] is None:
             OC_params['rep_dim'] = orig_data.shape[1]
         # Check center definition !
-        OC_hyperparams['center'] = torch.ones(OC_params['rep_dim'])
+        OC_hyperparams['center'] = torch.ones(OC_params['rep_dim'])*10
         
         OC_model = OneClassLayer(params=OC_params, 
                                  hyperparams=OC_hyperparams)
@@ -447,8 +448,11 @@ def main():
         if save_OC:
             pickle.dump((OC_model, OC_params, OC_hyperparams),open(OC_filename,'wb'))
     else:
-        OC_model,_,_ = pickle.load(open(OC_filename,'rb'))
-    
+        OC_model,OC_params, OC_hyperparams = pickle.load(open(OC_filename,'rb'))
+        print('### Loaded OC embedding model')
+        print('Parameters:', OC_params)
+        print('Hyperparameters:', OC_hyperparams)
+        
     # parameters for generative models
     params = dict()
     if debug_train: 
@@ -471,10 +475,11 @@ def main():
         
         params['gen_model_name'] = method
         
+        print('Lambda is ',lambda_)
         if method != 'adsgan':
             params['lambda'] = 0
         else:
-            params["lambda"] = 0.1
+            params["lambda"] = lambda_
         
     
         # Synthetic data generation
@@ -509,6 +514,7 @@ def main():
     
         ## Performance measures from ADS-GAN paper, FID and Parzen
         if debug_metrics:
+            print('Debugging metrics: only using 100 samples')
             orig_data = orig_data.loc[:100]
             synth_data = synth_data[:100]
         
@@ -516,7 +522,12 @@ def main():
         results_metrics = compute_metrics(orig_data.to_numpy(), synth_data, 
                                           which_metric=which_metric, 
                                           wd_params = params, model=OC_model)
-        #prc_curves.append(results_metrics['PR'])
+        
+        if 'OC' in which_metric[1]:
+            apc = results_metrics['alpha_pc_OC']
+            bcc = results_metrics['beta_cv_OC'] 
+            alpha = results_metrics['alphas']
+            prc_curves.append([alpha, apc])
         
         synth_data = pd.DataFrame(synth_data,columns = orig_data.columns)
     
@@ -538,7 +549,7 @@ def main():
         #plt.close('all')
         print('#### Computing predictive metrics')
         
-        if debug_metrics:
+        if debug_metrics or just_metrics:
             pred_perf = None
         else:
             pred_perf = predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y, method_name=method)
@@ -550,15 +561,18 @@ def main():
         ### Feature importance between orig and synth data
         all_results.append([results_metrics, pred_perf])
     
-    if debug_metrics or debug_train:
+    if debug_metrics or debug_train or just_metrics:
         return all_results
         
     feat_imp = feature_importance_comparison(X,Y, method_names=['orig']+methods)
         
-    #prd.plot([prc_curves], out_path=None)
+    if 'OC' in which_metric[1]:
+        prd.plot([prc_curves], out_path=None)
 
     return all_results
 
 if __name__ == '__main__':
-    all_results = main()
+    #for lambda_ in np.exp(np.arange(-2,4,0.5)):
+    lambda_ = 1
+    all_results = main(OC_params, OC_hyperparams)
     #pickle.dump(all_results, open(f'metrics/results{round(time.time())}.pkl','wb'))
