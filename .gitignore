@@ -110,6 +110,7 @@ ENV/
 .pylintrc
 visualisations/
 jupyter/
+models/
 
 # Data dir content
 data/*
@@ -119,3 +120,5 @@ data/amsterdam/*
 !data/amsterdam/*.py
 data/stock/*
 !data/stock/*.py
+data/ts_embeddings/*
+!data/ts_embeddings/*.py

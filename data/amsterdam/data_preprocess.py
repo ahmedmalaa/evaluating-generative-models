@@ -1,8 +1,8 @@
 import os
 from typing import Union, Tuple
-import warnings
 
-warnings.filterwarnings("ignore")
+# import warnings
+# warnings.filterwarnings("ignore")
 
 import numpy as np
 import pandas as pd
@@ -25,6 +25,44 @@ def _to_2d(arr: np.ndarray) -> np.ndarray:
     return np.reshape(arr, [n_patients * max_seq_len, dim])
 
 
+def combine_csvs(path_train, path_test, path_combined):
+    df_train = pd.read_csv(os.path.abspath(path_train))
+    df_test = pd.read_csv(os.path.abspath(path_test))
+    df_combined = df_train.append(df_test, ignore_index=True)
+    df_combined.sort_values(by=["admissionid", "Unnamed: 0"], ignore_index=True, inplace=True)
+    df_combined.to_csv(os.path.abspath(path_combined), index=False)
+
+
+def downsample_csv_by_admissionids(path, path_downsampled, downsample_n_ids, seed):
+    df = pd.read_csv(os.path.abspath(path))
+    ids = df["admissionid"].unique()
+    np.random.seed(seed)
+    np.random.shuffle(ids)
+    ds_ids = ids[:downsample_n_ids]
+    df_ds = df[df["admissionid"].isin(ds_ids)]
+    df_ds.to_csv(os.path.abspath(path_downsampled), index=False)
+
+
+def _padding_mask_to_seq_lens(padding_mask):
+    padding_mask_inverted = -1 * (padding_mask.astype(int) - 1)
+    padding_mask_as_seq_lens = padding_mask_inverted.sum(axis=1)[:, 0]  # Sum 1s along sequence dimension.  
+    # ^ As identical length for each feature, take 0th.
+    return padding_mask_as_seq_lens
+
+
+def prepare_for_s2s_ae(amsetrdam_loader, force_refresh):
+    assert amsetrdam_loader.pad_before == False 
+    raw_data, padding_mask, (train_idx, val_idx, test_idx) = amsetrdam_loader.load_reshape_split_data(force_refresh)
+    processed_data, imputed_processed_data = amsetrdam_loader.preprocess_data(raw_data, padding_mask)
+    seq_lens = _padding_mask_to_seq_lens(padding_mask)
+    data = {
+        "train": (imputed_processed_data[train_idx], seq_lens[train_idx]),
+        "val": (imputed_processed_data[val_idx], seq_lens[val_idx]),
+        "test": (imputed_processed_data[test_idx], seq_lens[test_idx]),
+    }
+    return data
+
+
 class AmsterdamLoader(object):
     
     def __init__(
@@ -33,8 +71,10 @@ class AmsterdamLoader(object):
         max_seq_len: int,
         seed: int,
         train_rate: float,
+        val_rate: float,
         include_time: bool,
         debug_data: Union[int, bool] = False,
+        pad_before: bool = False,
         padding_fill: float = -1.,
     ) -> None:
         """Initialise Amsterdam data loader. Here, the Amsterdam data refers to the Hide-and-Seek competition subset 
@@ -45,50 +85,62 @@ class AmsterdamLoader(object):
             max_seq_len (int): Maximum sequence length of the time series dimension - for reshaping.
             seed (int): Random seed for data split.
             train_rate (float): The fraction of the data to allocate to training set.
+            val_rate (float): The fraction of the data to allocate to validation set.
             include_time (bool): Whether to include time as the 0th feature in each example.
             debug_data (Union[int, bool], optional): If int, read only top debug_data-many rows, if True, 
                 read only top 10000 rows, if False read whole dataset. Defaults to False.
+            pad_before (bool, optional): If True, padding will be added at the beginning of time dimension, 
+                else padding added at the end. Defaults to False.
             padding_fill (float, optional): Pad timeseries vectors shorter than max_seq_len with this value. 
                 Defaults to -1.
         """
+        assert train_rate > 0. and val_rate >= 0. and (train_rate + val_rate) < 1.
         self.data_path = os.path.abspath(data_path)
         self.max_seq_len = max_seq_len
         self.seed = seed
         self.train_rate = train_rate
+        self.val_rate = val_rate
         self.include_time = include_time
         self.debug_data = debug_data
+        self.pad_before = pad_before
         self.padding_fill = padding_fill
 
-    def load_reshape_split_data(self, force_reload: bool) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Load prepared data, reshape to a 3D 3D array of shape [num_examples, max_seq_len, num_features], 
+    def load_reshape_split_data(self, force_refresh: bool) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Load prepared data, reshape to a 3D array of shape [num_examples, max_seq_len, num_features], 
         split into train, validation sets. Preprocessing of the data is done separately using `preprocess_data()`.
 
         Args:
-            force_reload (bool): If True, will rerun this from scratch, rather than using results cached in npz file.
+            force_refresh (bool): If True, will rerun this from scratch, rather than using results cached in npz file.
 
         Returns:
-            Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]: raw_data, padding_mask, train_idx, test_idx
+            Tuple[np.ndarray, np.ndarray, Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]: 
+                raw_data, padding_mask, (train_idx, val_idx, test_idx)
         """
 
         npz_path = self.data_path.replace(".csv", ".npz")
 
-        if os.path.exists(npz_path) and not force_reload:
+        if os.path.exists(npz_path) and not force_refresh:
             
-            print(f"Found existing cached .npz file ({npz_path}), using cached data. Set force_reload=True to reprocess.")
+            print(f"Found existing cached .npz file ({npz_path}), using cached data. Set force_refresh=True to refresh.")
             with np.load(npz_path) as data:
                 raw_data = data["raw_data"]
                 padding_mask = data["padding_mask"]
                 train_idx = data["train_idx"]
+                train_idx = data["val_idx"]
                 test_idx = data["test_idx"]
 
         else:
-
+            
             raw_data, padding_mask = self._load_and_reshape(self.data_path)
-            _, (train_idx, test_idx) = data_division(raw_data, seed=self.seed, divide_rates=[self.train_rate, 1 - self.train_rate])
+            _, (train_idx, val_idx, test_idx) = data_division(
+                raw_data, 
+                seed=self.seed, 
+                divide_rates=[self.train_rate, self.val_rate, 1 - self.train_rate - self.val_rate]
+            )
 
-            np.savez(npz_path, raw_data=raw_data, padding_mask=padding_mask, train_idx=train_idx, test_idx=test_idx)
+            np.savez(npz_path, raw_data=raw_data, padding_mask=padding_mask, train_idx=train_idx, val_idx=val_idx, test_idx=test_idx)
 
-        return raw_data, padding_mask, train_idx, test_idx
+        return raw_data, padding_mask, (train_idx, val_idx, test_idx)
 
     def _load_and_reshape(self, file_name: str) -> Tuple[np.ndarray, np.ndarray]:
         """Load data from `file_name` and reshape into a 3D array of shape [num_examples, max_seq_len, num_features].
@@ -133,7 +185,8 @@ class AmsterdamLoader(object):
         loaded_data = np.empty([no, self.max_seq_len, dim])  # Shape: [no, max_seq_len, dim]
         loaded_data.fill(padding_indicator)
 
-        # For each uniq id
+        # For each unique id
+        print("Reshaping data...")
         for i in tqdm(range(no)):
 
             # Extract the time-series data with a certain admissionid
@@ -145,7 +198,10 @@ class AmsterdamLoader(object):
             if curr_no >= self.max_seq_len:
                 loaded_data[i, :, :] = curr_data[:self.max_seq_len, 1:]  # Shape: [1, max_seq_len, dim]
             else:
-                loaded_data[i, -curr_no:, :] = curr_data[:, 1:]  # Shape: [1, max_seq_len, dim]
+                if self.pad_before:
+                    loaded_data[i, -curr_no:, :] = curr_data[:, 1:]  # Shape: [1, max_seq_len, dim]
+                else:
+                    loaded_data[i, :curr_no, :] = curr_data[:, 1:]  # Shape: [1, max_seq_len, dim]
 
         padding_mask = loaded_data == padding_indicator
         loaded_data = np.where(padding_mask, self.padding_fill, loaded_data)
@@ -169,6 +225,8 @@ class AmsterdamLoader(object):
         Returns:
             Tuple[np.ndarray, np.ndarray]: [0] preprocessed data, [1] preprocessed and imputed data.
         """
+        print("Preprocessing data...")
+
         median_vals = self._get_medians(data, padding_mask)
         imputed_data = self._impute(data, padding_mask, median_vals)
 
@@ -214,7 +272,6 @@ class AmsterdamLoader(object):
     def _get_medians(self, data: np.ndarray, padding_mask: np.ndarray):
         assert len(data.shape) == 3
 
-        max_seq_len = data.shape[1]
         data = _to_2d(data)
         if padding_mask is not None:
             padding_mask = _to_2d(padding_mask)
@@ -230,7 +287,6 @@ class AmsterdamLoader(object):
     def _get_scaler(self, data: np.ndarray, padding_mask: np.ndarray):
         assert len(data.shape) == 3
 
-        max_seq_len = data.shape[1]
         data = _to_2d(data)
         if padding_mask is not None:
             padding_mask = _to_2d(padding_mask)

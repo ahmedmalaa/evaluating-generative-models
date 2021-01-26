@@ -11,4 +11,4 @@ Code author: Jinsung Yoon, Evgeny Saveliev
 Contact: jsyoon0823@gmail.com, e.s.saveliev@gmail.com
 """
 
-from .data_preprocess import AmsterdamLoader
+from .data_preprocess import AmsterdamLoader, prepare_for_s2s_ae
