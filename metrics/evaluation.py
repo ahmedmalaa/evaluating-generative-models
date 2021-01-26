@@ -54,8 +54,8 @@ def compute_alpha_precision(real_data, synthetic_data, emb_center):
     
     real_to_synth_all  = [np.min(np.sum(np.abs(real_data[k, :] - synthetic_data), axis=1)) for k in range(real_data.shape[0])]
     real_to_real_all   = np.array([np.sum(np.abs(real_data[k, :] - real_data), axis=1) for k in range(real_data.shape[0])])
-    dist_probs         = [1/np.mean(real_to_synth_all[k] <= real_to_real_all[k, :]) for k in range(real_data.shape[0])]
-   
+    dist_probs         = [np.mean(real_to_synth_all[k] > real_to_real_all[k, :]) for k in range(real_data.shape[0])]
+    
     for k in range(len(Radii)):
         
         precision_audit_mask = (synth_to_center <= Radii[k]).detach().float().numpy()
@@ -73,7 +73,10 @@ def compute_alpha_precision(real_data, synthetic_data, emb_center):
     dist_ps    = np.array(dist_probs)
     dist_min   = np.min(dist_ps)
     dist_max   = np.max(dist_ps)
-
+    print(dist_ps)
+    print(np.mean(dist_ps))
+    print(np.std(dist_ps))
+    
     thresholds = np.linspace(dist_min, dist_max, 1000) 
     authen     = np.array([np.mean(dist_ps >= thresholds[k]) for k in range(len(thresholds))])
     
