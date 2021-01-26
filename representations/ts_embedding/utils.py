@@ -5,6 +5,8 @@ import numpy as np
 import torch
 from torch.utils.data import TensorDataset, DataLoader
 
+from .seq2seq_autoencoder import init_hidden
+
 
 def rearrange_data(x, x_len, pad_val, eos_val):
     """Take in sequence `x` [dims `(n_samples, max_seq_len, n_features)`, data type `float`] and an array of 
@@ -81,3 +83,34 @@ def make_dataloader(data_tensors, **dataloader_kwargs):
     dataset = TensorDataset(*data_tensors)
     dataloader = DataLoader(dataset, **dataloader_kwargs)
     return dataset, dataloader
+
+
+def _hc_repr_to_np(hc_repr):
+    h, c = hc_repr
+    batch_size = h.shape[1]
+    h, c = h.view(batch_size, -1), c.view(batch_size, -1)
+    h, c = h.detach().cpu().numpy(), c.detach().cpu().numpy()
+    hc = np.hstack([h, c])
+    return hc
+
+
+def get_embeddings(seq2seq, dataloaders_dict, use_sets=("train", "val", "test")):
+    """Put together the embeddings: stack horizontally the arrays of h and c; stack vertically these arrays for 
+    any combination of ("train", "val", "test") sets.
+    """
+    hc_np_list = []
+    for key in use_sets:
+        seq2seq.eval()
+        with torch.no_grad():
+            for iter_, (x, x_len, x_rev, x_rev_shift) in enumerate(dataloaders_dict[key]):
+                batch_size = x.shape[0]
+                hc_init = init_hidden(
+                    batch_size=batch_size, 
+                    hidden_size=seq2seq.encoder.hidden_size, 
+                    num_rnn_layers=seq2seq.encoder.num_rnn_layers, 
+                    device=x.device)
+                _, hc_repr = seq2seq(x_enc=x, x_dec=x_rev, x_seq_lengths=x_len, hc_init=hc_init)
+                hc_np = _hc_repr_to_np(hc_repr)
+                hc_np_list.append(hc_np)
+    hc_all = np.vstack(hc_np_list)
+    return hc_all

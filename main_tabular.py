@@ -429,6 +429,7 @@ OC_hyperparams = dict({"Radius": 1, "nu": 1e-2})
 if dataset != 'mnist':
     methods = ['orig','random','adsgan','wgan','vae']#, 'pategan'] 
 else:
+    pass
     
     
 

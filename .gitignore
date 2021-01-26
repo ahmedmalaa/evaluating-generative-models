@@ -122,7 +122,7 @@ data/amsterdam/*
 !data/amsterdam/*.py
 data/stock/*
 !data/stock/*.py
-data/ts_embeddings/*
-!data/ts_embeddings/*.py
+data/ts_embedding/*
+!data/ts_embedding/*.py
 data/mnist/*
 !data/mnist/*
