@@ -43,6 +43,12 @@ def data_to_tensors(x, x_len, x_rev, x_rev_shifted, float_type, device):
     return X, X_len, X_rev, X_rev_shifted
 
 
+def inference_data_to_tensors(x, x_len, float_type, device):
+    X = torch.tensor(x, device=device, dtype=float_type)
+    X_len = torch.tensor(x_len, dtype=int)  # CPU by requirement of packing.
+    return X, X_len
+
+
 def _generate_dummy_data(n_samples, min_timesteps, max_timesteps, n_features, pad_val, seed):
     np.random.seed(seed)
     
@@ -94,22 +100,22 @@ def _hc_repr_to_np(hc_repr):
     return hc
 
 
-def get_embeddings(seq2seq, dataloaders_dict, use_sets=("train", "val", "test")):
-    """Put together the embeddings: stack horizontally the arrays of h and c; stack vertically these arrays for 
-    any combination of ("train", "val", "test") sets.
+def get_embeddings(seq2seq, dataloaders):
+    """Put together the embeddings: stack horizontally the arrays of h and c; stack vertically these arrays.
     """
     hc_np_list = []
-    for key in use_sets:
+    for dataloader in dataloaders:
         seq2seq.eval()
         with torch.no_grad():
-            for iter_, (x, x_len, x_rev, x_rev_shift) in enumerate(dataloaders_dict[key]):
+            for iter_, dataloader_items in enumerate(dataloader):
+                x, x_len = dataloader_items[0], dataloader_items[1]
                 batch_size = x.shape[0]
                 hc_init = init_hidden(
                     batch_size=batch_size, 
                     hidden_size=seq2seq.encoder.hidden_size, 
                     num_rnn_layers=seq2seq.encoder.num_rnn_layers, 
                     device=x.device)
-                _, hc_repr = seq2seq(x_enc=x, x_dec=x_rev, x_seq_lengths=x_len, hc_init=hc_init)
+                hc_repr = seq2seq.get_embeddings_only(x_enc=x, x_seq_lengths=x_len, hc_init=hc_init)
                 hc_np = _hc_repr_to_np(hc_repr)
                 hc_np_list.append(hc_np)
     hc_all = np.vstack(hc_np_list)

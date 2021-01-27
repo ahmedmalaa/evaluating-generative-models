@@ -58,6 +58,15 @@ def padding_mask_to_seq_lens(padding_mask):
     return padding_mask_as_seq_lens
 
 
+def convert_front_padding_to_back_padding(data, seq_lens, pad_val):
+    if 0 in seq_lens:
+        raise ValueError("0 encountered in seq_lens.")
+    data_ = np.full_like(data, pad_val)
+    for idx, l in enumerate(seq_lens):
+        data_[idx, :l, :] = data[idx, -l:, :]
+    return data_
+
+
 def prepare_for_s2s_ae(amsterdam_loader, force_refresh):
     assert amsterdam_loader.pad_before == False 
     raw_data, padding_mask, (train_idx, val_idx, test_idx) = amsterdam_loader.load_reshape_split_data(force_refresh)

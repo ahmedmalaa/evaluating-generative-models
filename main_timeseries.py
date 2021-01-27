@@ -7,8 +7,7 @@ import os
 import numpy as np
 
 from generative_models.timegan import timegan
-from data.amsterdam import AmsterdamLoader
-from data.amsterdam.data_preprocess import padding_mask_to_seq_lens
+from data.amsterdam import AmsterdamLoader, padding_mask_to_seq_lens
 
 # ----------------------------------------------------------------------------------------------------------------------
 # Set experiment settings here:

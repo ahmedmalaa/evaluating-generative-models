@@ -59,6 +59,9 @@ class Seq2Seq(nn.Module):
         # print("x_enc_out.shape", x_enc_out.shape)
         x_dec_out, _, hc_dec = self.decoder(x_dec, x_seq_lengths, hc_enc)
         return x_dec_out, hc_enc
+    def get_embeddings_only(self, x_enc, x_seq_lengths, hc_init):
+        _, _, hc_enc = self.encoder(x_enc, x_seq_lengths, hc_init)
+        return hc_enc
 
 
 def init_hidden(batch_size, hidden_size, num_rnn_layers, device):

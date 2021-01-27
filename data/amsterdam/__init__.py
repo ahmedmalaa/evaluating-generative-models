@@ -11,4 +11,9 @@ Code author: Jinsung Yoon, Evgeny Saveliev
 Contact: jsyoon0823@gmail.com, e.s.saveliev@gmail.com
 """
 
-from .data_preprocess import AmsterdamLoader, prepare_for_s2s_ae
+from .data_preprocess import (
+    AmsterdamLoader, 
+    prepare_for_s2s_ae, 
+    padding_mask_to_seq_lens, 
+    convert_front_padding_to_back_padding
+)
