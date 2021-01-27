@@ -16,3 +16,5 @@ timegan.py
 utils.py
 
 """
+
+from .timegan import timegan

@@ -13,11 +13,10 @@ from .utils import (  # pylint: disable=relative-beyond-top-level
     batch_generator,
 )
 
-import tensorflow.compat.v1 as tf
-tf.disable_v2_behavior()
+import tensorflow as tf
 
 
-def timegan(ori_data):
+def timegan(ori_data, parameters):
     """TimeGAN function.
 
     Use original data as training set to generator synthetic data (time-series)
@@ -29,12 +28,14 @@ def timegan(ori_data):
     Returns:
         - generated_data: generated time-series data
     """
-    parameters = dict()
-    parameters["module"] = "gru"
-    parameters["hidden_dim"] = 10
-    parameters["num_layer"] = 3
-    parameters["iterations"] = 20000
-    parameters["batch_size"] = 128
+    if parameters is None:
+        parameters = dict()
+        parameters["module"] = "gru"
+        parameters["hidden_dim"] = 10
+        parameters["num_layer"] = 3
+        parameters["iterations"] = 20000
+        parameters["batch_size"] = 128
+        parameters["print_every_n_iters"] = 1000
 
     # Initialization on the Graph
     tf.reset_default_graph()
@@ -239,7 +240,7 @@ def timegan(ori_data):
         # Train embedder
         _, step_e_loss = sess.run([E0_solver, E_loss_T0], feed_dict={X: X_mb, T: T_mb})
         # Checkpoint
-        if itt % 1000 == 0:
+        if itt % parameters["print_every_n_iters"] == 0:
             print("step: " + str(itt) + "/" + str(iterations) + ", e_loss: " + str(np.round(np.sqrt(step_e_loss), 4)))
 
     print("Finish Embedding Network Training")
@@ -255,7 +256,7 @@ def timegan(ori_data):
         # Train generator
         _, step_g_loss_s = sess.run([GS_solver, G_loss_S], feed_dict={Z: Z_mb, X: X_mb, T: T_mb})
         # Checkpoint
-        if itt % 1000 == 0:
+        if itt % parameters["print_every_n_iters"] == 0:
             print("step: " + str(itt) + "/" + str(iterations) + ", s_loss: " + str(np.round(np.sqrt(step_g_loss_s), 4)))
 
     print("Finish Training with Supervised Loss Only")
@@ -289,7 +290,7 @@ def timegan(ori_data):
             _, step_d_loss = sess.run([D_solver, D_loss], feed_dict={X: X_mb, T: T_mb, Z: Z_mb})
 
         # Print multiple checkpoints
-        if itt % 1000 == 0:
+        if itt % parameters["print_every_n_iters"] == 0:
             print(
                 "step: "
                 + str(itt)
