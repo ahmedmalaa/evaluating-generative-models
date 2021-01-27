@@ -1,7 +1,9 @@
-"""
-"""
+"""Time series embedding.
 
+Author: Evgeny Saveliev (e.s.saveliev@gmail.com)
+"""
 import os
+import copy
 
 import numpy as np
 
@@ -16,12 +18,13 @@ from representations.ts_embedding import utils as s2s_utils
 # ----------------------------------------------------------------------------------------------------------------------
 # Set experiment settings here:
 
-run_experiment = "dummy"  # Options: ("dummy", "amsterdam",)
+run_experiment = "amsterdam_test_subset"  
+# ^ Options: ("dummy", "amsterdam_combined_downsampled_subset", "amsterdam_test_subset")
 models_dir = "./models/"
 embeddings_dir = "./data/ts_embedding/"
 
 # Dummy Data Experiment:
-dummy_experiment_settings = {
+dummy_exp_stgs = {
     "n_samples_train": 1000,
     "n_samples_val": 500,
     "n_samples_test": 1000,
@@ -42,8 +45,9 @@ dummy_experiment_settings = {
     "embeddings_name": "dummy_embeddings.npy"
 }
 
-# Amsterdam Data Experiment:
-amsterdam_experiment_settings = {
+# Amsterdam Data Experiments:
+# - "amsterdam_combined_downsampled_subset"
+amsterdam_comb_exp_stgs = {
     "train_frac": 0.4,
     "val_frac": 0.2,
     "n_features": 70,
@@ -59,9 +63,14 @@ amsterdam_experiment_settings = {
     "lr": 0.01,
     # --------------------
     "data_path": "data/amsterdam/combined_downsampled_longitudinal_data.csv",
-    "model_name": "s2s_ae_amsterdam.pt",
-    "embeddings_name": "amsterdam_embeddings.npy"
+    "model_name": "s2s_ae_amsterdam_comb.pt",
+    "embeddings_name": "amsterdam_embeddings_comb.npy"
 }
+# - "amsterdam_test_subset"
+amsterdam_test_exp_stgs = copy.deepcopy(amsterdam_comb_exp_stgs)
+amsterdam_test_exp_stgs["data_path"] = "data/amsterdam/test_longitudinal_data.csv"
+amsterdam_test_exp_stgs["model_name"] = "s2s_ae_amsterdam_test.pt"
+amsterdam_test_exp_stgs["embeddings_name"] = "amsterdam_embeddings_test.npy"
 
 # ----------------------------------------------------------------------------------------------------------------------
 # Utilities.
@@ -72,7 +81,7 @@ def make_all_dataloaders(data_dict):
     dataloaders_dict = dict()
     for dataset_name, data_tensors in data_dict.items():
         dataset, dataloader = s2s_utils.make_dataloader(
-            data_tensors=data_tensors, batch_size=amsterdam_experiment_settings["batch_size"], shuffle=False)
+            data_tensors=data_tensors, batch_size=amsterdam_comb_exp_stgs["batch_size"], shuffle=False)
         dataloaders_dict[dataset_name] = dataloader
     return dataloaders_dict
 
@@ -81,7 +90,7 @@ def prepare_all_amsterdam_data(x_xlen_dict, device):
     for key in ("train", "val", "test"):
         x, x_len = x_xlen_dict[key]
         x_rev, x_rev_shifted = s2s_utils.rearrange_data(
-            x, x_len, amsterdam_experiment_settings["pad_val"], amsterdam_experiment_settings["eos_val"])
+            x, x_len, amsterdam_comb_exp_stgs["pad_val"], amsterdam_comb_exp_stgs["eos_val"])
         data_dict[key] = s2s_utils.data_to_tensors(
             x, x_len, x_rev, x_rev_shifted, float_type=torch.float32, device=device)
     return data_dict
@@ -92,13 +101,13 @@ def generate_all_dummy_data(device):
     data_dict = dict()
     for key in ("train", "val", "test"):
         data_dict[key] = s2s_utils.generate_dummy_data(
-            n_samples=dummy_experiment_settings[f"n_samples_{key}"], 
-            min_timesteps=dummy_experiment_settings["min_timesteps"], 
-            max_timesteps=dummy_experiment_settings["max_timesteps"], 
-            n_features=dummy_experiment_settings["n_features"], 
-            pad_val=dummy_experiment_settings["pad_val"], 
-            eos_val=dummy_experiment_settings["eos_val"], 
-            seed=dummy_experiment_settings["data_gen_seed"], 
+            n_samples=dummy_exp_stgs[f"n_samples_{key}"], 
+            min_timesteps=dummy_exp_stgs["min_timesteps"], 
+            max_timesteps=dummy_exp_stgs["max_timesteps"], 
+            n_features=dummy_exp_stgs["n_features"], 
+            pad_val=dummy_exp_stgs["pad_val"], 
+            eos_val=dummy_exp_stgs["eos_val"], 
+            seed=dummy_exp_stgs["data_gen_seed"], 
             to_tensors=True,
             float_type=torch.float32, 
             device=device,
@@ -108,29 +117,31 @@ def generate_all_dummy_data(device):
 
 def main():
     if run_experiment == "dummy":
-        active_experiment_settings = dummy_experiment_settings
-    elif run_experiment == "amsterdam":
-        active_experiment_settings = amsterdam_experiment_settings
+        active_experiment_settings = dummy_exp_stgs
+    elif run_experiment == "amsterdam_combined_downsampled_subset":
+        active_experiment_settings = amsterdam_comb_exp_stgs
+    elif run_experiment == "amsterdam_test_subset":
+        active_experiment_settings = amsterdam_test_exp_stgs
 
     selected_device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     if run_experiment == "dummy":
         data_dict = generate_all_dummy_data(device=selected_device)
         dataloaders_dict = make_all_dataloaders(data_dict)
-    elif run_experiment == "amsterdam":
+    elif (run_experiment == "amsterdam_combined_downsampled_subset" or run_experiment == "amsterdam_test_subset"):
         data_path = os.path.abspath(active_experiment_settings["data_path"])
         amsterdam_loader = AmsterdamLoader(
             data_path=data_path,
-            max_seq_len=amsterdam_experiment_settings["max_timesteps"],
-            seed=amsterdam_experiment_settings["data_split_seed"],
-            train_rate=amsterdam_experiment_settings["train_frac"],
-            val_rate=amsterdam_experiment_settings["val_frac"],
+            max_seq_len=amsterdam_comb_exp_stgs["max_timesteps"],
+            seed=amsterdam_comb_exp_stgs["data_split_seed"],
+            train_rate=amsterdam_comb_exp_stgs["train_frac"],
+            val_rate=amsterdam_comb_exp_stgs["val_frac"],
             include_time=False,
             debug_data=False,
             pad_before=False,
-            padding_fill=amsterdam_experiment_settings["pad_val"],
+            padding_fill=amsterdam_comb_exp_stgs["pad_val"],
         )
-        x_xlen_dict = prepare_for_s2s_ae(amsetrdam_loader=amsterdam_loader, force_refresh=True)
+        x_xlen_dict = prepare_for_s2s_ae(amsterdam_loader=amsterdam_loader, force_refresh=True)
         data_dict = prepare_all_amsterdam_data(x_xlen_dict, device=selected_device)
         dataloaders_dict = make_all_dataloaders(data_dict)
     

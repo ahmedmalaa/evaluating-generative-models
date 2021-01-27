@@ -124,5 +124,7 @@ data/stock/*
 !data/stock/*.py
 data/ts_embedding/*
 !data/ts_embedding/*.py
+data/ts_generated/*
+!data/ts_generated/*.py
 data/mnist/*
 !data/mnist/*
