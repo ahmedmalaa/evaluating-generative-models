@@ -5,14 +5,17 @@ Created on Wed Jan 13 10:46:17 2021
 @author: Boris van Breugel (bv292@cam.ac.uk)
 """
 
+
 import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
+
 import glob
 
 import tensorflow as tf
-from keras.preprocessing.image import load_img
-from keras.preprocessing.image import img_to_array
-from keras.applications.vgg16 import preprocess_input
-from keras.models import Model
+from tensorflow.keras.preprocessing.image import load_img
+from tensorflow.keras.preprocessing.image import img_to_array
+from tensorflow.keras.applications.vgg16 import preprocess_input
+from tensorflow.keras.models import Model
 
 import numpy as np
 import torch
@@ -24,10 +27,12 @@ from metrics.combined import compute_metrics
 
 
 from PIL import Image
-
 tf.config.run_functions_eagerly(True)
 
-
+if torch.cuda.is_available():
+    device = 'cuda'
+else:
+    device = 'cpu'
 #%%
 
 
@@ -47,7 +52,8 @@ OC_params  = dict({"rep_dim": 100,
 
 OC_hyperparams = dict({"Radius": 1, "nu": 1e-2})
 
-which_metric = [['OC','PRDC','ID'],['OC']]
+which_metric = [['FID','ID','PRDC','WD'],['ID','OC']]
+#which_metric = None
 
 
 
@@ -67,10 +73,6 @@ def reset_weights(model):
     return model
 
 
-def identity_flatten(array):
-    return array.flatten(array.shape[0],-1)
- 
-    
 def remove_layer(model):
         new_input = model.input
         hidden_layer = model.layers[-2].output
@@ -97,11 +99,10 @@ def load_embedder(embedding):
             new_input = model.input
             hidden_layer = tf.keras.layers.Dense(64)(model.layers[-2].output)
             model = Model(new_input, hidden_layer)   
-    
-    #model.eval()
+    model.run_eagerly = True
     return model
 
-def plot_all(x, res, x_axis, metric_keys=None):
+def plot_all(x, res, x_axis, metric_keys=None, name=None):
     """ Plots results of experiment with varying mode drop/authenticity"""
     if type(res) == type([]):
         plot_legend = False
@@ -114,15 +115,19 @@ def plot_all(x, res, x_axis, metric_keys=None):
         metric_keys = res[exp_keys[0]][0].keys() 
     
     for m_key in metric_keys:
+        fig = fig = plt.figure(figsize=(12,6))
         for e_key in exp_keys:
-          y = [res[e_key][i][m_key] for i in range(len(x))]
-          plt.plot(x, y, label=e_key)
+            y = [res[e_key][i][m_key] for i in range(len(x))]
+            plt.plot(x, y, label=e_key)
         plt.ylabel(m_key)
         plt.ylim(bottom=0)
         plt.xlabel(x_axis) 
         if plot_legend:
             plt.legend()
-        plt.show()
+        if name is not None:
+            fig.savefig(f'visualisations/{name}_{m_key}.png', bbox_inches='tight', pad_inches=0)
+            
+        plt.close()
 
 
 #%% load data and conpute activations
@@ -144,6 +149,7 @@ def load_image_batch(files,shape):
     images = tf.convert_to_tensor(images)
     return images
 
+
 def load_all_images(files):
     """Convenience method for batch-loading images
     Params:
@@ -157,8 +163,6 @@ def load_all_images(files):
         images[i] = image
     images = preprocess_input(images)
     return images
-
-
 
 
 def get_activations_from_files(files, embedder, batch_size=None, verbose=False):
@@ -199,9 +203,11 @@ def get_activations_from_files(files, embedder, batch_size=None, verbose=False):
             end = n_imgs
         
  
-        batch = load_image_batch(files[start:end], input_shape)
-        pred = embedder(batch)
-        pred_arr[start:end] = pred
+        with tf.device('/GPU:0'):
+            batch = load_image_batch(files[start:end], input_shape)
+        
+        batch = embedder(batch)
+        pred_arr[start:end] = batch.numpy()
         del batch #clean up memory
         
     if verbose:
@@ -235,11 +241,12 @@ def get_activation(path, embedding, embedder=None, verbose=True):
                 print('Could not find activation file', act_filename)
             print('Calculating activations')
             files = list(glob.glob(os.path.join(path,'**/*.jpg'),recursive=True)) + list(glob.glob(os.path.join(path,'**/*.png'),recursive=True)) 
-            act = get_activations_from_files(files, embedder, batch_size=64*8, verbose=verbose)
+            act = get_activations_from_files(files, embedder, batch_size=64*2, verbose=verbose)
             # Save embeddings
             if save_act:
                 np.savez(f'{act_filename}', act=act,embedding=embedding)
     return act
+
 
 def activation_loader_per_class(path_set, embedding = None, verbose = False):
     print('#### Embedding info',embedding, '#####')
@@ -252,10 +259,12 @@ def activation_loader_per_class(path_set, embedding = None, verbose = False):
     for label in range(10):
         path = os.path.join(path_set,str(label))
         act = get_activation(path, embedding, embedder, True)
-        
         activations.append(act)
+        print(f'Label {label} has {act.shape[0]} observations')
             
     return activations
+
+
 
 
 def experiments(paths, embedding, OC_params, OC_hyperparams):
@@ -265,13 +274,16 @@ def experiments(paths, embedding, OC_params, OC_hyperparams):
     path = paths[0]
     
     X = get_activation(path, embedding)
-    
+    print('Shape original data:', X.shape)
     Y_per_class = activation_loader_per_class(paths[1],embedding)
-    Y_zero = Y_per_class[0]
-    num_per_class = len(Y_per_class[1])
+    num_per_class = 1000
+    Y_zero = Y_per_class[0][:10*num_per_class]
+    print(f'Label 0 has {Y_zero.shape[0]} elements')
     
-    Y_other = np.concatenate(Y_per_class[1:],axis=0)
-    step_size = 0.04
+    Y_other = np.concatenate([Y[:1000] for Y in Y_per_class[1:]],axis=0)
+    print(f'Label other has {Y_other.shape[0]} elements')
+    
+    step_size = 1
     
     # Train OC model
     OC_filename = f'metrics/OC_model_{dataset}_{embedding["model"]}_{embedding["dim64"]}.pkl' 
@@ -286,51 +298,58 @@ def experiments(paths, embedding, OC_params, OC_hyperparams):
 
     res_sim = []
     res_seq = []
-    
+    print('======= Started experiment 1 =========')
     for p_mode_drop in p_mode_drops:
         mode_drop = np.random.rand(len(Y_other))<p_mode_drop
+        print(f'p_drop={p_mode_drop} with total {np.sum(mode_drop)}')
         Y_A = Y_zero[:num_per_class+np.sum(mode_drop)]
-        Y_B = Y_other[1-mode_drop]
+        print(len(Y_A))
+        Y_B = Y_other[mode_drop==False]
         Y = np.concatenate((Y_A, Y_B), axis=0)
         res = compute_metrics(X, Y, which_metric, model = OC_model)
         res_sim.append(res)
- 
+    
+    print('======== Started experiment 2 =========')
     # sequential dropping    
-    for p_mode_drop in p_mode_drops:
-        n_mode_drop = np.sum(np.random.rand(len(Y_other))<p_mode_drop)
-        Y_A = Y_zero[:num_per_class+n_mode_drop]
-        Y_B = Y_other[:-n_mode_drop]
-        Y = np.concatenate(Y_A, Y_B, axis=0)
-        res = compute_metrics(X, Y, which_metric, model = OC_model)
-        res_seq.append(res)
+    # for p_mode_drop in p_mode_drops:
+    #     print(f'p_drop={p_mode_drop}')
+    #     n_mode_drop = np.sum(np.random.rand(len(Y_other))<p_mode_drop)
+    #     Y_A = Y_zero[:num_per_class+n_mode_drop]
+    #     if n_mode_drop != 0:
+    #         Y_B = Y_other[:-n_mode_drop]
+    #     else:
+    #         Y_B = Y_other
+    #     Y = np.concatenate((Y_A, Y_B), axis=0)
+    #     print('Y shapes', Y_A.shape, Y_B.shape, Y.shape)
+    #     res = compute_metrics(X, Y, which_metric, model = OC_model)
+    #     res_seq.append(res)
     
     
-    res = {}
-    res['Simultaneous'] = res_sim
-    res['Sequential'] = res_seq
-    plot_all(p_mode_drops, res, r'p')
+    
+    # res_md = {}
+    # res['Simultaneous'] = res_sim
+    # res_md['Sequential'] = res_seq
+    # plot_all(p_mode_drops, res_md, r'p', name='mode_dropping')
     
     
-    # Copied proportion
-    step_size = 0.1
-    p_copied = np.arange(0,1+step_size,step_size)
+    # # Copied proportion
+    # print('========= Started experiment 3 ========')
     
-    res = []
+    # step_size = 0.1
+    # p_copied = np.arange(0,1+step_size,step_size)
+    
+    # res_aut = []
 
-    for p in p_copied:
-        c = int(p*len(X))
-        Y_p = np.concatenate((X[:c],Y[c:]),axis=0)
-        res_ = compute_metrics(X, Y_p, model=OC_model)
-        res.append(res_)    
+    # for p in p_copied:
+    #     print(f'p_copied={p}')
+    #     c = int(p*len(X))
+    #     Y_p = np.concatenate((X[:c],Y[c:]),axis=0)
+    #     res_ = compute_metrics(X, Y_p, which_metric, model=OC_model)
+    #     res_aut.append(res_)    
         
-    plot_all(p_copied, res, r'$p_{copied}$') 
-    
+    # plot_all(p_copied, res_aut, r'$p_{copied}$', name='authenticity_copying') 
 
-
-    
-
-
-
+    # return (res_md, res_aut)
 
 
 #%% main
@@ -342,7 +361,7 @@ def get_OC_model(OC_filename, train_OC, X=None, OC_params=None, OC_hyperparams=N
         if OC_params['rep_dim'] is None:
             OC_params['rep_dim'] = X.shape[1]
         # Check center definition !
-        OC_hyperparams['center'] = torch.ones(OC_params['rep_dim'])
+        OC_hyperparams['center'] = torch.ones(OC_params['rep_dim'])*10
         
         OC_model = OneClassLayer(params=OC_params, 
                                  hyperparams=OC_hyperparams)
@@ -353,12 +372,15 @@ def get_OC_model(OC_filename, train_OC, X=None, OC_params=None, OC_hyperparams=N
     else:
         OC_model, OC_params, OC_hyperparams = pickle.load(open(OC_filename,'rb'))
     
+    OC_model.to(device)
     print(OC_params)
     print(OC_hyperparams)
     OC_model.eval()
+    return OC_model, OC_params, OC_hyperparams
 
 
-def main(paths, embedding, OC_params, OC_hyperparams, load_act=True, save_act=True,  verbose = False):
+
+def main(paths, embedding, OC_params, OC_hyperparams, load_act=True, save_act=True,  verbose = False, just_load=False):
     ''' Calculates the FID of two paths. '''
     
     print('#### Embedding info',embedding, '#####')
@@ -367,15 +389,19 @@ def main(paths, embedding, OC_params, OC_hyperparams, load_act=True, save_act=Tr
     # Load embedder function
     if embedding is not None:
         embedder = load_embedder(embedding)
+        print('Checking of embedder is using GPU')
+        sess = tf.compat.v1.Session(config=tf.compat.v1.ConfigProto(log_device_placement=True))
+        print(sess)
 
     # Loop through datasets
     for path_index, path in enumerate(paths):
         print('============ Path', path, '============')
         act = get_activation(path, embedding, embedder=embedder, verbose=True)
-            
+        if just_load:
+            continue            
         activations.append(act)            
         
-        # compute metrics
+    # compute metrics
         if path_index == 0:
             OC_filename = f'metrics/OC_model_{dataset}_{embedding["model"]}_{embedding["dim64"]}.pkl' 
             OC_model, OC_params, OC_hyperparams = get_OC_model(OC_filename, train_OC, act, OC_params, OC_hyperparams)
@@ -385,8 +411,8 @@ def main(paths, embedding, OC_params, OC_hyperparams, load_act=True, save_act=Tr
             
         else:
             results.append([compute_metrics(activations[0], act, model=OC_model), path])
-        
-        
+    
+    
     return results
 
 
@@ -394,16 +420,16 @@ def main(paths, embedding, OC_params, OC_hyperparams, load_act=True, save_act=Tr
 
 if __name__ == '__main__':
     os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-    
+    print('================',tf.executing_eagerly())
     #for embed in ['inceptionv3','vgg','identity']:
-    methods = ['WGAN-GP','DCGAN','VAE','CGAN', 'ADS-GAN']
+    methods = ['WGAN-GP','DCGAN','VAE', 'ADS-GAN']
     load_act = True
-    save_act = False
+    save_act = True
     nul_path = ['data/mnist/original/testing']
-    conditional_path = ['data/mnist/cgan_exp']
+    conditional_path = ['data/mnist/synth_test/CGAN']
     random_path = ['data/mnist/random']
-    other_paths = [f'data/mnist/synth/{method}' for method in methods]
-    paths = random_path # nul_path + random_path + other_paths
+    other_paths = [f'data/mnist/synth_test/{method}' for method in methods]
+    paths = nul_path + random_path + other_paths
     
     dataset = 'MNIST'
     train_OC = False
@@ -422,9 +448,9 @@ if __name__ == '__main__':
                 'randomise': True, 'dim64': True})
     
     outputs = []
-    experiments(nul_path+conditional_path, embeddings[0], OC_params, OC_hyperparams)
+    results = experiments(nul_path+conditional_path, embeddings[0], OC_params, OC_hyperparams)
+    pickle.dump(results,open('results_mnist_experiments.pkl','wb'))
     #for embedding in embeddings:
-
-            #output = main(paths, embedding, OC_params, OC_hyperparams, load_act, save_act,verbose=True)
+    #    output = main(paths, embedding, OC_params, OC_hyperparams, load_act, save_act,verbose=True, just_load = True)
             #outputs.append(output)
     

@@ -113,15 +113,17 @@ class OneClassLayer(BaseNet):
         self.epochs         = params['epochs']
         self.warm_up_epochs = params['warm_up_epochs']
         self.weight_decay   = params['weight_decay']
-        self.device         = torch.device('cpu') # Make this an option
-        
+        if torch.cuda.is_available():
+            self.device     = torch.device('cuda') # Make this an option
+        else:
+            self.device     = torch.device('cpu')
         # set up the network
         
-        self.model          = build_network(network_name="feedforward", params=params) 
+        self.model          = build_network(network_name="feedforward", params=params).to(self.device)
 
         # create the loss function
 
-        self.c              = hyperparams["center"]
+        self.c              = hyperparams["center"].to(self.device)
         self.R              = hyperparams["Radius"]
         self.nu             = hyperparams["nu"]
 
@@ -143,12 +145,7 @@ class OneClassLayer(BaseNet):
         
         if self.train_prop != 1:
             x_train, x_val = x_train[:int(self.train_prop*len(x_train))], x_train[int(self.train_prop*len(x_train)):]
-            if torch.cuda.is_available():
-                inputs_val = Variable(torch.from_numpy(x_val).cuda()).float()
-            
-            else:
-                inputs_val = Variable(torch.from_numpy(x_val)).float()
-            
+            inputs_val = Variable(torch.from_numpy(x_val).to(self.device)).float()
         
         self.losses         = []
         self.loss_vals       = []
@@ -158,13 +155,7 @@ class OneClassLayer(BaseNet):
             
             # Converting inputs and labels to Variable
             
-            if torch.cuda.is_available():
-                
-                inputs = Variable(torch.from_numpy(x_train).cuda()).float()
-            
-            else:
-                
-                inputs = Variable(torch.from_numpy(x_train)).float()
+            inputs = Variable(torch.from_numpy(x_train)).to(self.device).float()
             
             self.model.zero_grad()
 
@@ -188,7 +179,7 @@ class OneClassLayer(BaseNet):
             
             # get gradients w.r.t to parameters
             self.loss.backward(retain_graph=True)
-            self.losses.append(self.loss.detach().numpy())
+            self.losses.append(self.loss.detach().cpu().numpy())
         
             # update parameters
             self.optimizer.step()
@@ -212,7 +203,7 @@ class OneClassLayer(BaseNet):
                         
                     elif self.loss_type=="OneClass":
                         
-                        loss_val = self.loss_fn(outputs=outputs, c=self.c).item()
+                        loss_val = self.loss_fn(outputs=outputs, c=self.c).detach.cpu().numpy()
                     
                     self.loss_vals.append(loss_val)
                                         
