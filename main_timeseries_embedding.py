@@ -109,6 +109,7 @@ experiment_settings["apply:amsterdam:hns_competition_data"] = {
     ],
     "data_file_name": "data.npz",
     "pad_val": -999.,
+    "max_timesteps": 100,
     # --------------------
     "model_path": "./models/s2s_ae_amsterdam_test.pt",
     "batch_size": 1024, 
@@ -125,7 +126,6 @@ experiment_settings["apply:amsterdam:hns_competition_data"] = {
     "original_data_train_rate": 0.5,
     "original_data_val_rate": 0.,
     "original_data_split_seed": 12345,
-    "original_data_max_timesteps": 100,
     "original_data_embeddings_name": "hns_embeddings_ORIGINAL_DATA.npy",
 }
 
@@ -217,6 +217,19 @@ def prepare_hns_gen_data(hider_name, exp_settings):
 
     # Remove the time feature.
     generated_data = generated_data[:, :, 1:]
+    if padding_mask.shape != (0,):
+        padding_mask = padding_mask[:, :, 1:]
+    else:
+        padding_mask = None
+
+    # Impute in case any generated data had nans.
+    n_nan = np.isnan(generated_data).astype(int).sum()
+    if n_nan > 0:
+        generated_data = AmsterdamLoader.impute_only(
+            data=generated_data, padding_mask=padding_mask, padding_fill=exp_settings["pad_val"])
+        n_nan_after = np.isnan(generated_data).astype(int).sum()
+        assert n_nan_after == 0
+        print(f"{n_nan} nan values in the generated data were imputed.")
     
     return generated_data, seq_lens
 
@@ -338,13 +351,15 @@ def main():
                 )
                 embeddings = s2s_utils.get_embeddings(seq2seq=s2s, dataloaders=(dataloader,))
                 np.save(embeddings_filepath, embeddings)
+                n_nan = np.isnan(embeddings).astype(int).sum()
+                assert n_nan == 0
                 print(f"Generated and saved embeddings of shape: {embeddings.shape}. File: {embeddings_filepath}.")
             
             # Embed also original data.
             data_path = os.path.abspath(exp_settings["original_data_path"])
             amsterdam_loader = AmsterdamLoader(
                 data_path=data_path,
-                max_seq_len=exp_settings["original_data_max_timesteps"],
+                max_seq_len=exp_settings["max_timesteps"],
                 seed=exp_settings["original_data_split_seed"],
                 train_rate=exp_settings["original_data_train_rate"],
                 val_rate=exp_settings["original_data_val_rate"],

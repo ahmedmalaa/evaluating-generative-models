@@ -245,7 +245,7 @@ class AmsterdamLoader(object):
         print("Preprocessing data...")
 
         median_vals = self._get_medians(data, padding_mask)
-        imputed_data = self._impute(data, padding_mask, median_vals)
+        imputed_data = self._impute(data, padding_mask, median_vals, self.padding_fill)
 
         scaler_imputed = self._get_scaler(imputed_data, padding_mask)
         imputed_processed_data = self._preprocess(imputed_data, padding_mask, scaler_imputed)
@@ -255,7 +255,14 @@ class AmsterdamLoader(object):
 
         return processed_data, imputed_processed_data
 
-    def _imputation(self, curr_data: np.ndarray, median_vals: np.ndarray, zero_fill: bool = True) -> np.ndarray:
+    @staticmethod
+    def impute_only(data: np.ndarray, padding_mask: np.ndarray, padding_fill: float) -> np.ndarray:
+        median_vals = AmsterdamLoader._get_medians(data, padding_mask)
+        imputed_data = AmsterdamLoader._impute(data, padding_mask, median_vals, padding_fill)
+        return imputed_data
+
+    @staticmethod
+    def _imputation(curr_data: np.ndarray, median_vals: np.ndarray, zero_fill: bool = True) -> np.ndarray:
         """Impute missing data using bfill, ffill and median imputation.
 
         Args:
@@ -286,7 +293,8 @@ class AmsterdamLoader(object):
 
         return imputed_data.to_numpy()
 
-    def _get_medians(self, data: np.ndarray, padding_mask: np.ndarray):
+    @staticmethod
+    def _get_medians(data: np.ndarray, padding_mask: np.ndarray):
         assert len(data.shape) == 3
 
         data = _to_2d(data)
@@ -317,7 +325,13 @@ class AmsterdamLoader(object):
 
         return scaler
 
-    def _impute(self, data: np.ndarray, padding_mask: np.ndarray, median_vals: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    @staticmethod
+    def _impute(
+        data: np.ndarray, 
+        padding_mask: np.ndarray, 
+        median_vals: np.ndarray, 
+        padding_fill: float
+    ) -> Tuple[np.ndarray, np.ndarray]:
 
         assert len(data.shape) == 3
 
@@ -329,14 +343,14 @@ class AmsterdamLoader(object):
                 cur_data = np.where(padding_mask[i, :, :], np.nan, cur_data)
 
             # Scale and impute (excluding time)
-            cur_data_imputed = self._imputation(cur_data, median_vals)
+            cur_data_imputed = AmsterdamLoader._imputation(cur_data, median_vals)
 
             # Update
             data_imputed_[i, :, :] = cur_data_imputed
 
         # Set padding
         if padding_mask is not None:
-            data_imputed_ = np.where(padding_mask, self.padding_fill, data_imputed_)
+            data_imputed_ = np.where(padding_mask, padding_fill, data_imputed_)
 
         return data_imputed_
 
