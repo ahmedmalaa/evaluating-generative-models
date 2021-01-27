@@ -1,8 +1,16 @@
+"""Amsterdam UMCdb data preprocessing.
+
+The source data files required are those prepared for Hide-and-Seek NeurIPS 2020 competition:
+```
+train_longitudinal_data.csv
+test_longitudinal_data.csv
+```
+
+Author: Evgeny Saveliev (e.s.saveliev@gmail.com)
+"""
+
 import os
 from typing import Union, Tuple
-
-# import warnings
-# warnings.filterwarnings("ignore")
 
 import numpy as np
 import pandas as pd
@@ -43,18 +51,18 @@ def downsample_csv_by_admissionids(path, path_downsampled, downsample_n_ids, see
     df_ds.to_csv(os.path.abspath(path_downsampled), index=False)
 
 
-def _padding_mask_to_seq_lens(padding_mask):
+def padding_mask_to_seq_lens(padding_mask):
     padding_mask_inverted = -1 * (padding_mask.astype(int) - 1)
     padding_mask_as_seq_lens = padding_mask_inverted.sum(axis=1)[:, 0]  # Sum 1s along sequence dimension.  
     # ^ As identical length for each feature, take 0th.
     return padding_mask_as_seq_lens
 
 
-def prepare_for_s2s_ae(amsetrdam_loader, force_refresh):
-    assert amsetrdam_loader.pad_before == False 
-    raw_data, padding_mask, (train_idx, val_idx, test_idx) = amsetrdam_loader.load_reshape_split_data(force_refresh)
-    processed_data, imputed_processed_data = amsetrdam_loader.preprocess_data(raw_data, padding_mask)
-    seq_lens = _padding_mask_to_seq_lens(padding_mask)
+def prepare_for_s2s_ae(amsterdam_loader, force_refresh):
+    assert amsterdam_loader.pad_before == False 
+    raw_data, padding_mask, (train_idx, val_idx, test_idx) = amsterdam_loader.load_reshape_split_data(force_refresh)
+    processed_data, imputed_processed_data = amsterdam_loader.preprocess_data(raw_data, padding_mask)
+    seq_lens = padding_mask_to_seq_lens(padding_mask)
     data = {
         "train": (imputed_processed_data[train_idx], seq_lens[train_idx]),
         "val": (imputed_processed_data[val_idx], seq_lens[val_idx]),
@@ -126,7 +134,7 @@ class AmsterdamLoader(object):
                 raw_data = data["raw_data"]
                 padding_mask = data["padding_mask"]
                 train_idx = data["train_idx"]
-                train_idx = data["val_idx"]
+                val_idx = data["val_idx"]
                 test_idx = data["test_idx"]
 
         else:

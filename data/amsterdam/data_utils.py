@@ -1,3 +1,8 @@
+"""Amsterdam UMCdb data preprocessing: utilities.
+
+Author: Jinsung Yoon (jsyoon0823@gmail.com)
+"""
+
 import numpy as np
 import random
 
