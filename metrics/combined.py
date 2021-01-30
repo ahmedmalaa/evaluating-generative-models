@@ -20,6 +20,11 @@ from metrics.evaluation import compute_alpha_precision
 import torch
 import numpy as np
 
+if torch.cuda.is_available():
+    device = 'cuda'
+else:
+    device = 'cpu'
+
 def compute_metrics(X, Y, which_metric=None, wd_params=None, model=None):
     results = {}
     emb_types = ['']
@@ -31,25 +36,28 @@ def compute_metrics(X, Y, which_metric=None, wd_params=None, model=None):
         
     if wd_params is None:
         wd_params = dict()
-        wd_params['iterations'] = 10000
+        wd_params['iterations'] = 2000
         wd_params['h_dim'] = 30
         wd_params['z_dim'] = 10
         wd_params['mb_size'] = 128
     
     if which_metric is None:
-            which_metric = [['WD','ID','FD', 'PRDC', 'OC'], # normal
-                            ['WD','ID','FD', 'PRDC', 'OC']]                   # additional OneClass
+            which_metric = [['WD','FD', 'PRDC', 'OC'], # normal
+                            ['OC']]                   # additional OneClass
             
     for emb_index, emb in enumerate(emb_types):
         
         if emb_index == 1 and len(which_metric[1])>0:
-            print('Computing metrics for OneClass embedding')
+            print('Computing metrics for OC embedding')
+            print('Embedding data into OC representation')
+            model.to(device)
             with torch.no_grad():
-                X = model(torch.tensor(X).float()).detach().numpy()
-                Y = model(torch.tensor(Y).float()).detach().numpy()
+                X = model(torch.tensor(X).float().to(device)).cpu().detach().numpy()
+                Y = model(torch.tensor(Y).float().to(device)).cpu().detach().numpy()
+            print('Done embedding')
             print('X, std X', np.mean(X), np.std(X))
             print('Y, std Y', np.mean(Y), np.std(Y))
-            print(X.shape, Y.shape)
+            
         else:
             print('Computing metrics for no additional OneClass embedding')
     
@@ -107,12 +115,12 @@ def compute_metrics(X, Y, which_metric=None, wd_params=None, model=None):
                 emb_center = model.c
             else:
                 emb_center = np.mean(X,axis=0)
+            print('Start computing OC metrics')
             OC_res = compute_alpha_precision(X, Y, emb_center)
-            alphas, alpha_precision_curve, beta_coverage_curve, Delta_precision_alpha, Delta_coverage_beta, (thresholds, authen) = OC_res
+            alphas, alpha_precision_curve, beta_coverage_curve, Delta_precision_alpha, Delta_coverage_beta, authen = OC_res
             results[f'alphas{emb}'] = alphas
             results[f'alpha_pc{emb}'] = alpha_precision_curve
             results[f'beta_cv{emb}'] = beta_coverage_curve
-            results[f'thresholds{emb}'] = thresholds
             results[f'auten{emb}'] = authen
             results[f'Dpa{emb}'] = Delta_precision_alpha
             results[f'Dcb{emb}'] = Delta_coverage_beta

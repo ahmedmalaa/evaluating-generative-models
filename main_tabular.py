@@ -25,7 +25,7 @@ import os
 
 import pickle
 import time
-    
+import glob
 
 from representations.OneClass import OneClassLayer
 
@@ -78,7 +78,8 @@ def load_mnist_data(path, embedding_no=3):
                 'randomise': True, 'dim64': True})
     return get_activation(path, 
                           embedding=embeddings[embedding_no]) 
-    
+
+
 
 #%% Feature importance plots
 
@@ -130,7 +131,7 @@ def feature_importance_comparison(X, Y, method_names=None):
     
     if method_names is not None:
         bar_comparison(importances, 
-                   stds, labels=method_names, tick_names = X[0].columns, save_name = 'all_feat_importance')
+                   stds, labels=method_names, tick_names = X[0].columns, z_name = 'all_feat_importance')
 
     return [importances, stds]
 
@@ -373,7 +374,7 @@ def roc(X, y, classifier, n_splits=6, pos_label = 2):
 
 #%%  
 # Set settings:
-dataset = 'covid'
+dataset = 'ts'
 #method = 'adsgan' #adsgan, wgan, gan, vae
 
 original_data_dir = 'data/tabular/original'
@@ -388,16 +389,16 @@ just_metrics = True
 
 #Save synthetic data iff we're training
 # Train generative models
-do_train = False
+do_train = True
 save_synth = False
 train_ratio = 0.8
 # just relevant for ADS-GAN
 lambda_ = 1
 
 # Train OneClass representation model
-train_OC = True
+train_OC = False
 # If train is true, save new model (overwrites old OC model)
-save_OC = False
+save_OC = True
  
 which_metric = [['ID','OC'],['OC']]
     
@@ -426,37 +427,18 @@ OC_params  = dict({"rep_dim": 32,
 
 OC_hyperparams = dict({"Radius": 1, "nu": 1e-2})
 
-if dataset != 'mnist':
-    methods = ['orig','random','adsgan','wgan','vae']#, 'pategan'] 
-else:
-    pass
+#if dataset != 'mnist':
+methods = ['adsgan']#, 'pategan'] 
+#else:
     
-    
-
-
-
-def main(OC_params, OC_hyperparams):
-    plt.close('all')
-    
-    prc_curves = []
- 
-        # Load data
-    if dataset == 'bc':
-        orig_data = load_breast_cancer_data()  
-    elif dataset == 'covid':
-        orig_data = load_covid_data()  
-    elif dataset == 'mnist':
+def main_from_files(OC_params, OC_hyperparams):
+    if dataset == 'mnist':
         orig_data = load_mnist_data('data/mnist/original/testing')
-    else:
-        raise ValueError('Not a valid dataset name given')
+
+    elif dataset == 'ts':
+        orig_data = np.load(glob.glob('data/ts/original/*')[0])
+        synth_files = glob.glob('data/ts/synthetic/*')
     
-    # Some different data definitions
-    #orig_train_index = round(len(orig_data)*train_ratio)
-    orig_X, orig_Y = orig_data.drop(columns=['target']), orig_data.target
-    # orig_X_train, orig_X_test = orig_X[:orig_train_index], orig_X[orig_train_index:]
-    # orig_Y_train, orig_Y_test = orig_Y[:orig_train_index], orig_Y[orig_train_index:]
-    
-    OC_params['input_dim'] = orig_data.shape[1]
     OC_filename = f'metrics/OC_model_{dataset}.pkl'    
     if train_OC or not os.path.exists(OC_filename):
         print('### Training OC embedding model')
@@ -465,10 +447,10 @@ def main(OC_params, OC_hyperparams):
             OC_params['rep_dim'] = orig_data.shape[1]
         # Check center definition !
         OC_hyperparams['center'] = torch.ones(OC_params['rep_dim'])*10
-        
+        OC_params['input_dim'] = orig_data.shape[1]
         OC_model = OneClassLayer(params=OC_params, 
                                  hyperparams=OC_hyperparams)
-        OC_model.fit(orig_data.to_numpy(), verbosity=True)
+        OC_model.fit(orig_data, verbosity=True)
         if save_OC:
             pickle.dump((OC_model, OC_params, OC_hyperparams),open(OC_filename,'wb'))
     else:
@@ -482,15 +464,89 @@ def main(OC_params, OC_hyperparams):
     if debug_train: 
         params['iterations'] = 10
     else:
-        params["iterations"] = 10000
+        params["iterations"] = 2000
     params["h_dim"] = 200
     params["z_dim"] = 20
     params["mb_size"] = 128
-    #train_ratio = 0.8
+
+    
+    results = {}
+    for path in synth_files:
+        print(f'\n============== {path} ==============')
+        synth_data = np.load(path)
+        if np.sum(np.isnan(synth_data))>0:
+            print('Data contains NaN. Will skip this path')
+            continue
+        print('#### Computing static metrics')
+        results_metrics = compute_metrics(orig_data, synth_data, 
+                                          which_metric=which_metric, 
+                                          wd_params = params, model=OC_model)
+        results[path] = results_metrics
+    return results
+    
+
+def get_OC_model(OC_filename, train_OC, X=None, OC_params=None, OC_hyperparams=None):
+    if train_OC or not os.path.exists(OC_filename):
+        
+        OC_params['input_dim'] = X.shape[1]
+
+        if OC_params['rep_dim'] is None:
+            OC_params['rep_dim'] = X.shape[1]
+        # Check center definition !
+        OC_hyperparams['center'] = torch.ones(OC_params['rep_dim'])*10
+        
+        OC_model = OneClassLayer(params=OC_params, 
+                                 hyperparams=OC_hyperparams)
+        OC_model.fit(X,verbosity=True)
+        if save_OC:
+            pickle.dump((OC_model, OC_params, OC_hyperparams),open(OC_filename,'wb'))
+    
+    else:
+        OC_model, OC_params, OC_hyperparams = pickle.load(open(OC_filename,'rb'))
+        print('### Loaded OC embedding model')
+        print('Parameters:', OC_params)
+        print('Hyperparameters:', OC_hyperparams)
+    
+    OC_model.eval()
+    return OC_model, OC_params, OC_hyperparams
+    
+
+def main(OC_params, OC_hyperparams):
+    plt.close('all')
+    
+    prc_curves = []
+        # Load data
+    if dataset == 'bc':
+        orig_data = load_breast_cancer_data()  
+    elif dataset == 'covid':
+        orig_data = load_covid_data()  
+    else:
+        raise ValueError('Not a valid dataset name given')
+    
+    # Some different data definitions
+    orig_train_index = round(len(orig_data)*train_ratio)
+    orig_X, orig_Y = orig_data.drop(columns=['target']), orig_data.target
+    #orig_X_train, orig_X_test = orig_X[:orig_train_index], orig_X[orig_train_index:]
+    #orig_Y_train, orig_Y_test = orig_Y[:orig_train_index], orig_Y[orig_train_index:]
+    
+    OC_params['input_dim'] = orig_data.shape[1]
+    OC_filename = f'metrics/OC_model_{dataset}.pkl'    
+    OC_model,OC_params, OC_hyperparams = get_OC_model(OC_filename, train_OC, X=None, OC_params=None, OC_hyperparams=None)
+        
+    # parameters for generative models
+    params = dict()
+    if debug_train: 
+        params['iterations'] = 10
+    else:
+        params["iterations"] = 2000
+    params["h_dim"] = 200
+    params["z_dim"] = 20
+    params["mb_size"] = 128
         
     all_results = []
     X = [orig_X]
     Y = [orig_Y]
+    
     
     
     for method in methods:
@@ -589,13 +645,14 @@ def main(OC_params, OC_hyperparams):
         return all_results
         
     feat_imp = feature_importance_comparison(X,Y, method_names=['orig']+methods)
-        
+    
     if 'OC' in which_metric[1]:
         prd.plot([prc_curves], out_path=None)
 
     return all_results
 
 if __name__ == '__main__':
-    #for lambda_ in np.exp(np.arange(-2,4,0.5)):
-    all_results = main(OC_params, OC_hyperparams)
+    results = main_from_files(OC_params, OC_hyperparams)
+        #for lambda_ in np.exp(np.arange(-4,-2,0.5)):
+    #    all_results = main(OC_params, OC_hyperparams)
     #pickle.dump(all_results, open(f'metrics/results{round(time.time())}.pkl','wb'))
