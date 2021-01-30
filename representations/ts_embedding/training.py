@@ -15,7 +15,7 @@ from .seq2seq_autoencoder import init_hidden, compute_loss
 loss_function = nn.MSELoss(reduction="none")
 
 
-def iterate_eval_set(seq2seq, dataloader):
+def iterate_eval_set(seq2seq, dataloader, padding_value, max_seq_len):
     epoch_test_loss = 0.
     
     seq2seq.eval()
@@ -31,8 +31,15 @@ def iterate_eval_set(seq2seq, dataloader):
                 num_rnn_layers=seq2seq.encoder.num_rnn_layers, 
                 device=x.device)
 
-            x_dec_out, hc_repr = seq2seq(x_enc=x, x_dec=x_rev, x_seq_lengths=x_len, hc_init=hc_init)
-
+            x_dec_out, hc_repr = seq2seq(
+                x_enc=x, 
+                x_dec=x_rev, 
+                x_seq_lengths=x_len, 
+                hc_init=hc_init, 
+                padding_value=padding_value, 
+                max_seq_len=max_seq_len
+            )
+            
             loss_tensor = compute_loss(
                 loss_function=loss_function, x_pred=x_dec_out, x_targ=x_rev_shift, x_seq_len=x_len)
             loss = loss_tensor.mean()
@@ -50,6 +57,8 @@ def train_seq2seq_autoencoder(
     val_dataloader, 
     n_epochs, 
     batch_size, 
+    padding_value, 
+    max_seq_len,
     jupyter_live_plot_enabled=False
 ):
     
@@ -74,7 +83,14 @@ def train_seq2seq_autoencoder(
                 num_rnn_layers=seq2seq.encoder.num_rnn_layers, 
                 device=x.device)
             
-            x_dec_out, hc_repr = seq2seq(x_enc=x, x_dec=x_rev, x_seq_lengths=x_len, hc_init=hc_init)
+            x_dec_out, hc_repr = seq2seq(
+                x_enc=x, 
+                x_dec=x_rev, 
+                x_seq_lengths=x_len, 
+                hc_init=hc_init, 
+                padding_value=padding_value, 
+                max_seq_len=max_seq_len
+            )
             
             loss_tensor = compute_loss(
                 loss_function=loss_function, x_pred=x_dec_out, x_targ=x_rev_shift, x_seq_len=x_len)
@@ -86,7 +102,8 @@ def train_seq2seq_autoencoder(
         
         epoch_train_loss /= n_samples_train
         
-        epoch_val_loss = iterate_eval_set(seq2seq=seq2seq, dataloader=val_dataloader)
+        epoch_val_loss = iterate_eval_set(
+            seq2seq=seq2seq, dataloader=val_dataloader, padding_value=padding_value, max_seq_len=max_seq_len)
         
         train_losses[epoch] = epoch_train_loss
         val_losses[epoch] = epoch_val_loss

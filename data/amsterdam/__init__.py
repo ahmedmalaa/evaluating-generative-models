@@ -13,7 +13,8 @@ Contact: jsyoon0823@gmail.com, e.s.saveliev@gmail.com
 
 from .data_preprocess import (
     AmsterdamLoader, 
-    prepare_for_s2s_ae, 
+    preprocess_data,
     padding_mask_to_seq_lens, 
     convert_front_padding_to_back_padding
 )
+from .data_utils import data_division

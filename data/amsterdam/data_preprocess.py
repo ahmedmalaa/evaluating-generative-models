@@ -20,6 +20,9 @@ from sklearn.preprocessing import MinMaxScaler
 from .data_utils import data_division
 
 
+# ----------------------------------------------------------------------------------------------------------------------
+# General helpers.
+
 def _to_3d(arr: np.ndarray, max_seq_len: int) -> np.ndarray:
     n_patients = arr.shape[0] // max_seq_len
     dim = arr.shape[1]
@@ -32,6 +35,9 @@ def _to_2d(arr: np.ndarray) -> np.ndarray:
     dim = arr.shape[2]
     return np.reshape(arr, [n_patients * max_seq_len, dim])
 
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Helpers for Seq2Seq autoencoder.
 
 def combine_csvs(path_train, path_test, path_combined):
     df_train = pd.read_csv(os.path.abspath(path_train))
@@ -67,19 +73,8 @@ def convert_front_padding_to_back_padding(data, seq_lens, pad_val):
     return data_
 
 
-def prepare_for_s2s_ae(amsterdam_loader, force_refresh):
-    assert amsterdam_loader.pad_before == False 
-    raw_data, padding_mask, (train_idx, val_idx, test_idx) = amsterdam_loader.load_reshape_split_data(force_refresh)
-    processed_data, imputed_processed_data = amsterdam_loader.preprocess_data(raw_data, padding_mask)
-    seq_lens = padding_mask_to_seq_lens(padding_mask)
-    data = {
-        "train": (imputed_processed_data[train_idx], seq_lens[train_idx]),
-        "val": (imputed_processed_data[val_idx], seq_lens[val_idx]),
-        "test": (imputed_processed_data[test_idx], seq_lens[test_idx]),
-    }
-    return data
-
-
+# ----------------------------------------------------------------------------------------------------------------------
+# Data loader.
 class AmsterdamLoader(object):
     
     def __init__(
@@ -225,162 +220,174 @@ class AmsterdamLoader(object):
 
         return loaded_data, padding_mask
 
-    def preprocess_data(self, data: np.ndarray, padding_mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """Preprocess and impute `data`.
 
-        Note:
-            The 0th feature is time, and it is preprocessed differently to the other features: not normalized to [0, 1]
-            but shifted by -max_time_for_example.
+# ----------------------------------------------------------------------------------------------------------------------
+# Data preprocessing.
 
-        Args:
-            data (np.ndarray of float): 
-                Data as loaded (and reshaped to 3D). Shape [num_examples, max_seq_len, num_features].
-            padding_mask (np.ndarray of bool): 
-                Padding mask of data, indicating True where time series were shorter than max_seq_len and were padded. 
-                Same shape as data.
+def preprocess_data(
+    data: np.ndarray, 
+    padding_mask: np.ndarray, 
+    padding_fill: float,
+    time_feature_included: bool
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Preprocess and impute `data`.
 
-        Returns:
-            Tuple[np.ndarray, np.ndarray]: [0] preprocessed data, [1] preprocessed and imputed data.
-        """
-        print("Preprocessing data...")
+    Note:
+        If `time_feature_included=True`, the 0th feature is time, and it is preprocessed differently to the other 
+        features: not normalized to [0, 1] but shifted by -max_time_for_example.
 
-        median_vals = self._get_medians(data, padding_mask)
-        imputed_data = self._impute(data, padding_mask, median_vals, self.padding_fill)
+    Args:
+        data (np.ndarray of float): 
+            Data as loaded (and reshaped to 3D). Shape [num_examples, max_seq_len, num_features].
+        padding_mask (np.ndarray of bool): 
+            Padding mask of data, indicating True where time series were shorter than max_seq_len and were padded. 
+            Same shape as data.
+        padding_fill (float): 
+            Pad timeseries vectors shorter than max_seq_len with this value.
+        time_feature_included (bool): 
+            Whether to include time as the 0th feature in each example.
 
-        scaler_imputed = self._get_scaler(imputed_data, padding_mask)
-        imputed_processed_data = self._preprocess(imputed_data, padding_mask, scaler_imputed)
+    Returns:
+        Tuple[np.ndarray, np.ndarray]: [0] preprocessed data, [1] preprocessed and imputed data.
+    """
+    print("Preprocessing data...")
 
-        scaler_original = self._get_scaler(data, padding_mask)
-        processed_data = self._preprocess(data, padding_mask, scaler_original)
+    median_vals = _get_medians(data, padding_mask)
+    imputed_data = _impute(data, padding_mask, median_vals, padding_fill)
 
-        return processed_data, imputed_processed_data
+    scaler_imputed = _get_scaler(imputed_data, padding_mask)
+    imputed_processed_data = \
+        _preprocess(imputed_data, padding_mask, scaler_imputed, padding_fill, time_feature_included)
 
-    @staticmethod
-    def impute_only(data: np.ndarray, padding_mask: np.ndarray, padding_fill: float) -> np.ndarray:
-        median_vals = AmsterdamLoader._get_medians(data, padding_mask)
-        imputed_data = AmsterdamLoader._impute(data, padding_mask, median_vals, padding_fill)
-        return imputed_data
+    scaler_original = _get_scaler(data, padding_mask)
+    processed_data = \
+        _preprocess(data, padding_mask, scaler_original, padding_fill, time_feature_included)
 
-    @staticmethod
-    def _imputation(curr_data: np.ndarray, median_vals: np.ndarray, zero_fill: bool = True) -> np.ndarray:
-        """Impute missing data using bfill, ffill and median imputation.
+    return processed_data, imputed_processed_data
 
-        Args:
-            curr_data (np.ndarray): Data before imputation.
-            median_vals (np.ndarray): Median values for each column.
-            zero_fill (bool, optional): Whather to Fill with zeros the cases where median_val is nan. Defaults to True.
+def _imputation(curr_data: np.ndarray, median_vals: np.ndarray, zero_fill: bool = True) -> np.ndarray:
+    """Impute missing data using bfill, ffill and median imputation.
 
-        Returns:
-            np.ndarray: Imputed data.
-        """
+    Args:
+        curr_data (np.ndarray): Data before imputation.
+        median_vals (np.ndarray): Median values for each column.
+        zero_fill (bool, optional): Whather to Fill with zeros the cases where median_val is nan. Defaults to True.
 
-        curr_data = pd.DataFrame(data=curr_data)
-        median_vals = pd.Series(median_vals)
+    Returns:
+        np.ndarray: Imputed data.
+    """
 
-        # Backward fill
-        imputed_data = curr_data.bfill(axis="rows")
-        # Forward fill
-        imputed_data = imputed_data.ffill(axis="rows")
-        # Median fill
-        imputed_data = imputed_data.fillna(median_vals)
+    curr_data = pd.DataFrame(data=curr_data)
+    median_vals = pd.Series(median_vals)
 
-        # Zero-fill, in case the `median_vals` for a particular feature is `nan`.
-        if zero_fill:
-            imputed_data = imputed_data.fillna(0.0)
+    # Backward fill
+    imputed_data = curr_data.bfill(axis="rows")
+    # Forward fill
+    imputed_data = imputed_data.ffill(axis="rows")
+    # Median fill
+    imputed_data = imputed_data.fillna(median_vals)
 
-        if imputed_data.isnull().any().any():
-            raise ValueError("NaN values remain after imputation")
+    # Zero-fill, in case the `median_vals` for a particular feature is `nan`.
+    if zero_fill:
+        imputed_data = imputed_data.fillna(0.0)
 
-        return imputed_data.to_numpy()
+    if imputed_data.isnull().any().any():
+        raise ValueError("NaN values remain after imputation")
 
-    @staticmethod
-    def _get_medians(data: np.ndarray, padding_mask: np.ndarray):
-        assert len(data.shape) == 3
+    return imputed_data.to_numpy()
 
-        data = _to_2d(data)
+def _get_medians(data: np.ndarray, padding_mask: np.ndarray):
+    assert len(data.shape) == 3
+
+    data = _to_2d(data)
+    if padding_mask is not None:
+        padding_mask = _to_2d(padding_mask)
+        data_temp = np.where(padding_mask, np.nan, data)  # To avoid PADDING_INDICATOR affecting results.
+    else:
+        data_temp = data
+
+    # Medians
+    median_vals = np.nanmedian(data_temp, axis=0)  # Shape: [dim + 1]
+
+    return median_vals
+
+def _get_scaler(data: np.ndarray, padding_mask: np.ndarray):
+    assert len(data.shape) == 3
+
+    data = _to_2d(data)
+    if padding_mask is not None:
+        padding_mask = _to_2d(padding_mask)
+        data_temp = np.where(padding_mask, np.nan, data)  # To avoid PADDING_INDICATOR affecting results.
+    else:
+        data_temp = data
+
+    # Scaler
+    scaler = MinMaxScaler()
+    scaler.fit(data_temp)  # Note that np.nan's will be left untouched.
+
+    return scaler
+
+def _impute(
+    data: np.ndarray, 
+    padding_mask: np.ndarray, 
+    median_vals: np.ndarray, 
+    padding_fill: float
+) -> Tuple[np.ndarray, np.ndarray]:
+
+    assert len(data.shape) == 3
+
+    data_imputed_ = np.zeros_like(data)
+
+    for i in range(data.shape[0]):
+        cur_data = data[i, :, :]
         if padding_mask is not None:
-            padding_mask = _to_2d(padding_mask)
-            data_temp = np.where(padding_mask, np.nan, data)  # To avoid PADDING_INDICATOR affecting results.
-        else:
-            data_temp = data
+            cur_data = np.where(padding_mask[i, :, :], np.nan, cur_data)
 
-        # Medians
-        median_vals = np.nanmedian(data_temp, axis=0)  # Shape: [dim + 1]
+        # Scale and impute (excluding time)
+        cur_data_imputed = _imputation(cur_data, median_vals)
 
-        return median_vals
+        # Update
+        data_imputed_[i, :, :] = cur_data_imputed
 
-    def _get_scaler(self, data: np.ndarray, padding_mask: np.ndarray):
-        assert len(data.shape) == 3
+    # Set padding
+    if padding_mask is not None:
+        data_imputed_ = np.where(padding_mask, padding_fill, data_imputed_)
 
-        data = _to_2d(data)
+    return data_imputed_
+
+def _preprocess(
+    data: np.ndarray, 
+    padding_mask: np.ndarray, 
+    scaler: MinMaxScaler,
+    padding_fill: float,
+    time_feature_included: bool,
+) -> Tuple[np.ndarray, np.ndarray]:
+
+    assert len(data.shape) == 3
+
+    data_ = np.zeros_like(data)
+
+    for i in range(data.shape[0]):
+        cur_data = data[i, :, :]
         if padding_mask is not None:
-            padding_mask = _to_2d(padding_mask)
-            data_temp = np.where(padding_mask, np.nan, data)  # To avoid PADDING_INDICATOR affecting results.
-        else:
-            data_temp = data
+            cur_data = np.where(padding_mask[i, :, :], np.nan, cur_data)
 
-        # Scaler
-        scaler = MinMaxScaler()
-        scaler.fit(data_temp)  # Note that np.nan's will be left untouched.
+        # Preprocess time (0th element of dim. 2):
+        if time_feature_included:
+            preprocessed_time = cur_data[:, 0] - np.nanmin(cur_data[:, 0])
 
-        return scaler
+        # Scale and impute (excluding time)
+        cur_data = scaler.transform(cur_data)
 
-    @staticmethod
-    def _impute(
-        data: np.ndarray, 
-        padding_mask: np.ndarray, 
-        median_vals: np.ndarray, 
-        padding_fill: float
-    ) -> Tuple[np.ndarray, np.ndarray]:
+        # Set time
+        if time_feature_included:
+            cur_data[:, 0] = preprocessed_time
 
-        assert len(data.shape) == 3
+        # Update
+        data_[i, :, :] = cur_data
 
-        data_imputed_ = np.zeros_like(data)
+    # Set padding
+    if padding_mask is not None:
+        data_ = np.where(padding_mask, padding_fill, data_)
 
-        for i in range(data.shape[0]):
-            cur_data = data[i, :, :]
-            if padding_mask is not None:
-                cur_data = np.where(padding_mask[i, :, :], np.nan, cur_data)
-
-            # Scale and impute (excluding time)
-            cur_data_imputed = AmsterdamLoader._imputation(cur_data, median_vals)
-
-            # Update
-            data_imputed_[i, :, :] = cur_data_imputed
-
-        # Set padding
-        if padding_mask is not None:
-            data_imputed_ = np.where(padding_mask, padding_fill, data_imputed_)
-
-        return data_imputed_
-
-    def _preprocess(self, data: np.ndarray, padding_mask: np.ndarray, scaler: MinMaxScaler) -> Tuple[np.ndarray, np.ndarray]:
-
-        assert len(data.shape) == 3
-
-        data_ = np.zeros_like(data)
-
-        for i in range(data.shape[0]):
-            cur_data = data[i, :, :]
-            if padding_mask is not None:
-                cur_data = np.where(padding_mask[i, :, :], np.nan, cur_data)
-
-            # Preprocess time (0th element of dim. 2):
-            if self.include_time:
-                preprocessed_time = cur_data[:, 0] - np.nanmin(cur_data[:, 0])
-
-            # Scale and impute (excluding time)
-            cur_data = scaler.transform(cur_data)
-
-            # Set time
-            if self.include_time:
-                cur_data[:, 0] = preprocessed_time
-
-            # Update
-            data_[i, :, :] = cur_data
-
-        # Set padding
-        if padding_mask is not None:
-            data_ = np.where(padding_mask, self.padding_fill, data_)
-
-        return data_
+    return data_

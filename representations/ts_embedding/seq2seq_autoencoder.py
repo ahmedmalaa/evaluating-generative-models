@@ -15,10 +15,10 @@ class Encoder(nn.Module):
         
         self.lstm = nn.LSTM(input_size=input_size, hidden_size=hidden_size, num_layers=num_rnn_layers, batch_first=True)
 
-    def forward(self, x, x_seq_lengths, hc, padding_value=-999.):
+    def forward(self, x, x_seq_lengths, hc, padding_value, max_seq_len):
         x = pack_padded_sequence(x, x_seq_lengths, batch_first=True, enforce_sorted=False)
         x, hc = self.lstm(x, hc)
-        x, x_seq_lens = pad_packed_sequence(x, batch_first=True, padding_value=padding_value)
+        x, x_seq_lens = pad_packed_sequence(x, batch_first=True, padding_value=padding_value, total_length=max_seq_len)
         return x, x_seq_lens, hc
 
 
@@ -33,11 +33,11 @@ class Decoder(nn.Module):
         self.lstm = nn.LSTM(input_size=input_size, hidden_size=hidden_size, num_layers=num_rnn_layers, batch_first=True)
         self.linear = nn.Linear(hidden_size, input_size)
 
-    def forward(self, x, x_seq_lengths, hc, padding_value=-999.):
+    def forward(self, x, x_seq_lengths, hc, padding_value, max_seq_len):
         batch_size = x.shape[0]
         x = pack_padded_sequence(x, x_seq_lengths, batch_first=True, enforce_sorted=False)
         x, hc = self.lstm(x, hc)
-        x, x_seq_lens = pad_packed_sequence(x, batch_first=True, padding_value=padding_value)
+        x, x_seq_lens = pad_packed_sequence(x, batch_first=True, padding_value=padding_value, total_length=max_seq_len)
         # x = x.contiguous()
         x = x.view(-1, self.hidden_size)
         x = self.linear(x)
@@ -52,15 +52,15 @@ class Seq2Seq(nn.Module):
         assert encoder.hidden_size == decoder.hidden_size
         self.encoder = encoder
         self.decoder = decoder
-    def forward(self, x_enc, x_dec, x_seq_lengths, hc_init):
+    def forward(self, x_enc, x_dec, x_seq_lengths, hc_init, padding_value, max_seq_len):
         # print(x_enc.dtype, x_dec.dtype, x_seq_lengths.dtype, hc_init[0].dtype, hc_init[1].dtype)
-        x_enc_out, _, hc_enc = self.encoder(x_enc, x_seq_lengths, hc_init)
+        x_enc_out, _, hc_enc = self.encoder(x_enc, x_seq_lengths, hc_init, padding_value, max_seq_len)
         # print("x_enc.shape", x_enc.shape)
         # print("x_enc_out.shape", x_enc_out.shape)
-        x_dec_out, _, hc_dec = self.decoder(x_dec, x_seq_lengths, hc_enc)
+        x_dec_out, _, hc_dec = self.decoder(x_dec, x_seq_lengths, hc_enc, padding_value, max_seq_len)
         return x_dec_out, hc_enc
-    def get_embeddings_only(self, x_enc, x_seq_lengths, hc_init):
-        _, _, hc_enc = self.encoder(x_enc, x_seq_lengths, hc_init)
+    def get_embeddings_only(self, x_enc, x_seq_lengths, hc_init, padding_value, max_seq_len):
+        _, _, hc_enc = self.encoder(x_enc, x_seq_lengths, hc_init, padding_value, max_seq_len)
         return hc_enc
 
 

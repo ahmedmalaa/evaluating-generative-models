@@ -3,7 +3,6 @@
 Author: Evgeny Saveliev (e.s.saveliev@gmail.com)
 """
 import os
-import copy
 
 import numpy as np
 
@@ -12,9 +11,10 @@ import torch.optim as optim
 
 from data.amsterdam import (
     AmsterdamLoader, 
-    prepare_for_s2s_ae, 
+    preprocess_data,
     padding_mask_to_seq_lens, 
-    convert_front_padding_to_back_padding
+    convert_front_padding_to_back_padding,
+    data_division
 )
 from representations.ts_embedding import Encoder, Decoder, Seq2Seq, train_seq2seq_autoencoder, iterate_eval_set
 from representations.ts_embedding import utils as s2s_utils
@@ -28,6 +28,7 @@ from representations.ts_embedding import utils as s2s_utils
 #     "learn:dummy" 
 #     "learn:amsterdam:combined_downsampled_subset" 
 #     "learn:amsterdam:test_subset"
+#     "learn:amsterdam:hns_subset"
 #   - Apply existing embeddings:
 #     "apply:amsterdam:hns_competition_data"
 run_experiment = "apply:amsterdam:hns_competition_data"
@@ -65,26 +66,77 @@ experiment_settings["learn:amsterdam:combined_downsampled_subset"] = {
     "val_frac": 0.2,
     "n_features": 70,
     # --------------------
+    "include_time": False,
     "max_timesteps": 100,
     "pad_val": -999.,
     "eos_val": +777., 
     "data_split_seed": 12345,
+    "data_loading_force_refresh": True,
+    # --------------------
+    "n_epochs": 50,
+    "batch_size": 1024, 
+    "hidden_size": 70,
+    "num_rnn_layers": 2,
+    "lr": 0.01,
+    # --------------------
+    "data_path": "./data/amsterdam/combined_downsampled_longitudinal_data.csv",
+    "model_name": "s2s_ae_amsterdam_comb.pt",
+    "embeddings_name": "amsterdam_embeddings_comb.npy"
+}
+# - "learn:amsterdam:test_subset"
+experiment_settings["learn:amsterdam:test_subset"] = {
+    "train_frac": 0.4,
+    "val_frac": 0.2,
+    "n_features": 70,
+    # --------------------
+    "include_time": False,
+    "max_timesteps": 100,
+    "pad_val": -999.,
+    "eos_val": +777., 
+    "data_split_seed": 12345,
+    "data_loading_force_refresh": True,
+    # --------------------
     "n_epochs": 100,
     "batch_size": 1024, 
     "hidden_size": 70,
     "num_rnn_layers": 2,
     "lr": 0.01,
     # --------------------
-    "data_path": "data/amsterdam/combined_downsampled_longitudinal_data.csv",
-    "model_name": "s2s_ae_amsterdam_comb.pt",
-    "embeddings_name": "amsterdam_embeddings_comb.npy"
+    "data_path": "./data/amsterdam/test_longitudinal_data.csv",
+    "model_name": "s2s_ae_amsterdam_test.pt",
+    "embeddings_name": "amsterdam_embeddings_test.npy"
 }
-# - "learn:amsterdam:test_subset"
-experiment_settings["learn:amsterdam:test_subset"] = \
-    copy.deepcopy(experiment_settings["learn:amsterdam:combined_downsampled_subset"])
-experiment_settings["learn:amsterdam:test_subset"]["data_path"] = "data/amsterdam/test_longitudinal_data.csv"
-experiment_settings["learn:amsterdam:test_subset"]["model_name"] = "s2s_ae_amsterdam_test.pt"
-experiment_settings["learn:amsterdam:test_subset"]["embeddings_name"] = "amsterdam_embeddings_test.npy"
+# - "learn:amsterdam:hns_subset"
+experiment_settings["learn:amsterdam:hns_subset"] = {
+    "train_frac": 0.4,
+    "val_frac": 0.2,
+    "n_features": 70,
+    # --------------------
+    "data_load": {
+        "force_refresh": True,
+        "include_time": True,
+        "max_timesteps": 100,
+        "pad_val": -1.,
+        "train_frac": 0.5,
+        "val_frac": 0.,
+        "data_split_seed": 12345,
+    },
+    # --------------------
+    "max_timesteps": 100,
+    "pad_val": -1.,
+    "eos_val": +2., 
+    "data_split_seed": 22222,
+    # --------------------
+    "n_epochs": 100,
+    "batch_size": 1024, 
+    "hidden_size": 70,
+    "num_rnn_layers": 2,
+    "lr": 0.01,
+    # --------------------
+    "data_path": "./data/amsterdam/hns_test_longitudinal_data.csv",  # NOTE: copy of test_longitudinal_data.csv
+    "model_name": "s2s_ae_amsterdam_hns.pt",
+    "embeddings_name": "amsterdam_embeddings_hns.npy"
+}
 
 # Hide-and-seek Competition Apply Autoencoder Experiment:
 experiment_settings["apply:amsterdam:hns_competition_data"] = {
@@ -108,31 +160,46 @@ experiment_settings["apply:amsterdam:hns_competition_data"] = {
         "hns_baseline_add_noise",
     ],
     "data_file_name": "data.npz",
-    "pad_val": -999.,
-    "max_timesteps": 100,
+    "pad_val": experiment_settings["learn:amsterdam:hns_subset"]["pad_val"],
+    "eos_val": experiment_settings["learn:amsterdam:hns_subset"]["eos_val"],
+    "max_timesteps": experiment_settings["learn:amsterdam:hns_subset"]["max_timesteps"],
     # --------------------
-    "model_path": "./models/s2s_ae_amsterdam_test.pt",
-    "batch_size": 1024, 
-    "n_features": 70,
-    "hidden_size": 70,
-    "num_rnn_layers": 2,
+    "model_path": "./models/s2s_ae_amsterdam_hns.pt",
+    "batch_size": experiment_settings["learn:amsterdam:hns_subset"]["batch_size"], 
+    "n_features": experiment_settings["learn:amsterdam:hns_subset"]["n_features"],
+    "hidden_size": experiment_settings["learn:amsterdam:hns_subset"]["hidden_size"],
+    "num_rnn_layers": experiment_settings["learn:amsterdam:hns_subset"]["num_rnn_layers"],
     # --------------------
     "embeddings_subdir": "hns_comp",
     "embeddings_name": "hns_embeddings_<uname>.npy",
     # --------------------
-    # NOTE: The exact same train-test split applied to `test_longitudinal_data.csv` as in the competition, 
-    # the test subset is saved as original data.
-    "original_data_path":  "data/amsterdam/test_longitudinal_data.csv",
-    "original_data_train_rate": 0.5,
-    "original_data_val_rate": 0.,
-    "original_data_split_seed": 12345,
-    "original_data_embeddings_name": "hns_embeddings_ORIGINAL_DATA.npy",
+    "proc_cached_dir": "./data/ts_generated/hns_comp_proc_cached",
+    "load_from_proc_cached": False,
 }
 
 # ----------------------------------------------------------------------------------------------------------------------
 # Utilities.
 
 # Amsterdam data utilities.
+
+def prepare_for_s2s_ae_amsterdam(amsterdam_loader, settings):
+    assert amsterdam_loader.pad_before == False
+    raw_data, padding_mask, (train_idx, val_idx, test_idx) = \
+        amsterdam_loader.load_reshape_split_data(force_refresh=settings["data_loading_force_refresh"])
+    processed_data, imputed_processed_data = preprocess_data(
+        raw_data, 
+        padding_mask, 
+        padding_fill=settings["pad_val"],
+        time_feature_included=settings["include_time"],
+    )
+    seq_lens = padding_mask_to_seq_lens(padding_mask)
+    data = {
+        "train": (imputed_processed_data[train_idx], seq_lens[train_idx]),
+        "val": (imputed_processed_data[val_idx], seq_lens[val_idx]),
+        "test": (imputed_processed_data[test_idx], seq_lens[test_idx]),
+    }
+    return data
+
 
 def make_all_dataloaders(data_dict, exp_settings):
     dataloaders_dict = dict()
@@ -141,6 +208,7 @@ def make_all_dataloaders(data_dict, exp_settings):
             data_tensors=data_tensors, batch_size=exp_settings["batch_size"], shuffle=False)
         dataloaders_dict[dataset_name] = dataloader
     return dataloaders_dict
+
 
 def prepare_all_amsterdam_data(x_xlen_dict, device, exp_settings):
     data_dict = dict()
@@ -151,6 +219,7 @@ def prepare_all_amsterdam_data(x_xlen_dict, device, exp_settings):
         data_dict[key] = s2s_utils.data_to_tensors(
             x, x_len, x_rev, x_rev_shifted, float_type=torch.float32, device=device)
     return data_dict
+
 
 # Dummy data utilities.
 
@@ -172,6 +241,7 @@ def generate_all_dummy_data(device):
         )
     return data_dict
 
+
 # Hide-and-seek competition data utilities.
 
 def _check_padding_mask_integrity(padding_mask):
@@ -188,13 +258,74 @@ def _check_padding_mask_integrity(padding_mask):
                 assert (curr, nex) != (False, True)
 
 
+def _coerce_hns_data_to_s2s_ae_format(data, padding_mask, pad_val):
+    if padding_mask.shape != (0,):
+        # Has a padding mask case.
+        seq_lens = padding_mask_to_seq_lens(padding_mask=padding_mask)
+        data = convert_front_padding_to_back_padding(data=data, seq_lens=seq_lens, pad_val=pad_val)
+    else:
+        # No padding mask case, all seq_lens are max length.
+        seq_lens = np.array([data.shape[1]] * data.shape[0]).astype(int)
+
+    # Remove the time feature.
+    data = data[:, :, 1:]
+    if padding_mask.shape != (0,):
+        padding_mask = padding_mask[:, :, 1:]
+    else:
+        padding_mask = None
+    
+    return data, padding_mask, seq_lens
+
+
+def prepare_for_s2s_ae_hns(amsterdam_loader, settings):
+    
+    # First obtain the same data subset as in H&S competition.
+    assert amsterdam_loader.pad_before == True
+    raw_data, padding_mask, (train_idx_, _, _) = \
+        amsterdam_loader.load_reshape_split_data(force_refresh=settings["data_load"]["force_refresh"])
+    hns_raw_data, hns_padding_mask = raw_data[train_idx_], padding_mask[train_idx_]  
+    # ^ The dataset used in H&S competition.
+
+    # Now get the split for autoencoder training:
+    _, (train_idx, val_idx, test_idx) = data_division(
+        hns_raw_data, 
+        seed=settings["data_split_seed"], 
+        divide_rates=[
+            settings["train_frac"], 
+            settings["val_frac"], 
+            1 - settings["train_frac"] - settings["val_frac"]
+        ]
+    )
+
+    # Preprocess.
+    _, hns_imputed_processed_data = preprocess_data(
+        data=hns_raw_data, 
+        padding_mask=hns_padding_mask, 
+        padding_fill=settings["data_load"]["pad_val"],
+        time_feature_included=settings["data_load"]["include_time"],
+    )
+    # Coerce to Seq2Seq autoencoder input format.
+    hns_final_data, hns_final_padding_mask, hns_seq_lens = _coerce_hns_data_to_s2s_ae_format(
+        data=hns_imputed_processed_data, 
+        padding_mask=hns_padding_mask, 
+        pad_val=settings["data_load"]["pad_val"]
+    )
+    
+    data = {
+        "train": (hns_final_data[train_idx], hns_seq_lens[train_idx]),
+        "val": (hns_final_data[val_idx], hns_seq_lens[val_idx]),
+        "test": (hns_final_data[test_idx], hns_seq_lens[test_idx]),
+    }
+    return data
+
+
 def prepare_hns_gen_data(hider_name, exp_settings):
 
     data = np.load(os.path.join(exp_settings["gen_data_path"], hider_name, exp_settings["data_file_name"]))
     generated_data = data["generated_data"]
     padding_mask = data["padding_mask"]
 
-    # Check padding mask integrity
+    # Check padding mask integrity.
     if padding_mask.shape != (0,):
         assert padding_mask.shape == (7695, 100, 71)
         _check_padding_mask_integrity(padding_mask)
@@ -203,43 +334,32 @@ def prepare_hns_gen_data(hider_name, exp_settings):
         note = "- NO padding mask."
     print(f"hider '{hider_name}' padding_mask checked {note}")
 
-    if padding_mask.shape != (0,):
-        # Has a padding mask case.
-        seq_lens = padding_mask_to_seq_lens(padding_mask=padding_mask)
-        generated_data = convert_front_padding_to_back_padding(
-            data=generated_data, 
-            seq_lens=seq_lens, 
-            pad_val=exp_settings["pad_val"]
-        )
-    else:
-        # No padding mask case, all seq_lens are max length.
-        seq_lens = np.array([generated_data.shape[1]] * generated_data.shape[0]).astype(int)
+    # Preprocess.
+    _, generated_data = preprocess_data(
+        data=generated_data, 
+        padding_mask=padding_mask if padding_mask.shape != (0,) else None, 
+        padding_fill=exp_settings["pad_val"],
+        time_feature_included=True,
+    )
+    # Coerce to Seq2Seq autoencoder input format.
+    generated_data, padding_mask, seq_lens = _coerce_hns_data_to_s2s_ae_format(
+        data=generated_data, padding_mask=padding_mask, pad_val=exp_settings["pad_val"])
 
-    # Remove the time feature.
-    generated_data = generated_data[:, :, 1:]
-    if padding_mask.shape != (0,):
-        padding_mask = padding_mask[:, :, 1:]
-    else:
-        padding_mask = None
-
-    # Impute in case any generated data had nans.
-    n_nan = np.isnan(generated_data).astype(int).sum()
-    if n_nan > 0:
-        generated_data = AmsterdamLoader.impute_only(
-            data=generated_data, padding_mask=padding_mask, padding_fill=exp_settings["pad_val"])
-        n_nan_after = np.isnan(generated_data).astype(int).sum()
-        assert n_nan_after == 0
-        print(f"{n_nan} nan values in the generated data were imputed.")
-    
     return generated_data, seq_lens
 
 
 def get_hns_dataloader(x, x_len, device, exp_settings):
-    X, X_len = s2s_utils.inference_data_to_tensors(x, x_len, float_type=torch.float32, device=device)
+    x_rev, x_rev_shifted = s2s_utils.rearrange_data(
+            x, x_len, exp_settings["pad_val"], exp_settings["eos_val"])
+
+    X, X_len, X_rev, X_rev_shifted = s2s_utils.data_to_tensors(
+        x, x_len, x_rev, x_rev_shifted, float_type=torch.float32, device=device)
+
     dataset, dataloader = s2s_utils.make_dataloader(
-            data_tensors=(X, X_len), 
+            data_tensors=(X, X_len, X_rev, X_rev_shifted), 
             batch_size=exp_settings["batch_size"], 
             shuffle=False)
+
     return dataset, dataloader
 
 
@@ -258,19 +378,40 @@ def main():
             run_experiment == "learn:amsterdam:combined_downsampled_subset" or 
             run_experiment == "learn:amsterdam:test_subset"
         ):
-            data_path = os.path.abspath(exp_settings["data_path"])
             amsterdam_loader = AmsterdamLoader(
-                data_path=data_path,
+                data_path=os.path.abspath(exp_settings["data_path"]),
                 max_seq_len=exp_settings["max_timesteps"],
                 seed=exp_settings["data_split_seed"],
                 train_rate=exp_settings["train_frac"],
                 val_rate=exp_settings["val_frac"],
-                include_time=False,
+                include_time=exp_settings["include_time"],
                 debug_data=False,
                 pad_before=False,
                 padding_fill=exp_settings["pad_val"],
             )
-            x_xlen_dict = prepare_for_s2s_ae(amsterdam_loader=amsterdam_loader, force_refresh=True)
+            x_xlen_dict = prepare_for_s2s_ae_amsterdam(
+                amsterdam_loader=amsterdam_loader, 
+                settings=exp_settings,
+            )
+            data_dict = prepare_all_amsterdam_data(x_xlen_dict, device=selected_device, exp_settings=exp_settings)
+            dataloaders_dict = make_all_dataloaders(data_dict, exp_settings=exp_settings)
+        elif run_experiment == "learn:amsterdam:hns_subset":
+            # This loader matches the H&S competition data loading settings.
+            amsterdam_loader = AmsterdamLoader(
+                data_path=os.path.abspath(exp_settings["data_path"]),
+                max_seq_len=exp_settings["data_load"]["max_timesteps"],
+                seed=exp_settings["data_load"]["data_split_seed"],
+                train_rate=exp_settings["data_load"]["train_frac"],
+                val_rate=exp_settings["data_load"]["val_frac"],
+                include_time=exp_settings["data_load"]["include_time"],
+                debug_data=False,
+                pad_before=True,  # NOTE: This matches the H&S competition setup.
+                padding_fill=exp_settings["data_load"]["pad_val"],
+            )
+            x_xlen_dict = prepare_for_s2s_ae_hns(
+                amsterdam_loader=amsterdam_loader, 
+                settings=exp_settings,
+            )
             data_dict = prepare_all_amsterdam_data(x_xlen_dict, device=selected_device, exp_settings=exp_settings)
             dataloaders_dict = make_all_dataloaders(data_dict, exp_settings=exp_settings)
         
@@ -295,9 +436,16 @@ def main():
             train_dataloader=dataloaders_dict["train"],
             val_dataloader=dataloaders_dict["val"], 
             n_epochs=exp_settings["n_epochs"], 
-            batch_size=exp_settings["batch_size"]
+            batch_size=exp_settings["batch_size"],
+            padding_value=exp_settings["pad_val"],
+            max_seq_len=exp_settings["max_timesteps"],
         )
-        eval_loss = iterate_eval_set(seq2seq=s2s, dataloader=dataloaders_dict["test"])
+        eval_loss = iterate_eval_set(
+            seq2seq=s2s, 
+            dataloader=dataloaders_dict["test"],
+            padding_value=exp_settings["pad_val"],
+            max_seq_len=exp_settings["max_timesteps"]
+        )
         print(f"Ev.Ls.={eval_loss:.3f}")
 
         # Save model.
@@ -308,7 +456,9 @@ def main():
         embeddings_filepath = os.path.join(os.path.abspath(embeddings_dir), exp_settings["embeddings_name"])
         embeddings = s2s_utils.get_embeddings(
             seq2seq=s2s, 
-            dataloaders=(dataloaders_dict["train"], dataloaders_dict["val"], dataloaders_dict["test"])
+            dataloaders=(dataloaders_dict["train"], dataloaders_dict["val"], dataloaders_dict["test"]),
+            padding_value=exp_settings["pad_val"],
+            max_seq_len=exp_settings["max_timesteps"]
         )
         np.save(embeddings_filepath, embeddings)
         print(f"Generated and saved embeddings of shape: {embeddings.shape}. File: {embeddings_filepath}.")
@@ -336,12 +486,28 @@ def main():
             for hider_name in exp_settings["hiders_list"]:
                 
                 # Prepare the data.
-                generated_data, seq_lens = prepare_hns_gen_data(hider_name=hider_name, exp_settings=exp_settings)
+                filepath_proc_cached = os.path.join(exp_settings["proc_cached_dir"], f"{hider_name}.npz")
+                if not exp_settings["load_from_proc_cached"]:
+                    generated_data, seq_lens = prepare_hns_gen_data(hider_name=hider_name, exp_settings=exp_settings)
+                    np.savez(filepath_proc_cached, x=generated_data, x_len=seq_lens)
+                else:
+                    with np.load(filepath_proc_cached) as data:
+                        generated_data = data["x"]
+                        seq_lens = data["x_len"]
+                
                 dataset, dataloader = get_hns_dataloader(
                     x=generated_data, 
                     x_len=seq_lens, 
                     device=selected_device, 
                     exp_settings=exp_settings)
+                
+                # Get autoencoder loss.
+                autoencoder_loss = iterate_eval_set(
+                    seq2seq=s2s, 
+                    dataloader=dataloader,
+                    padding_value=exp_settings["pad_val"],
+                    max_seq_len=exp_settings["max_timesteps"]
+                )
 
                 # Save embeddings.
                 embeddings_filepath = os.path.join(
@@ -349,37 +515,21 @@ def main():
                     exp_settings["embeddings_subdir"],
                     exp_settings["embeddings_name"].replace("<uname>", hider_name)
                 )
-                embeddings = s2s_utils.get_embeddings(seq2seq=s2s, dataloaders=(dataloader,))
+                embeddings = s2s_utils.get_embeddings(
+                    seq2seq=s2s, 
+                    dataloaders=(dataloader,),
+                    padding_value=exp_settings["pad_val"],
+                    max_seq_len=exp_settings["max_timesteps"]
+                )
                 np.save(embeddings_filepath, embeddings)
                 n_nan = np.isnan(embeddings).astype(int).sum()
                 assert n_nan == 0
+
+                # Print info.
+                print(f"H&S submission '{hider_name}':")
+                print(f"AE Loss = {autoencoder_loss:.3f}")
                 print(f"Generated and saved embeddings of shape: {embeddings.shape}. File: {embeddings_filepath}.")
-            
-            # Embed also original data.
-            data_path = os.path.abspath(exp_settings["original_data_path"])
-            amsterdam_loader = AmsterdamLoader(
-                data_path=data_path,
-                max_seq_len=exp_settings["max_timesteps"],
-                seed=exp_settings["original_data_split_seed"],
-                train_rate=exp_settings["original_data_train_rate"],
-                val_rate=exp_settings["original_data_val_rate"],
-                include_time=False,
-                debug_data=False,
-                pad_before=False,
-                padding_fill=exp_settings["pad_val"],
-            )
-            x_xlen_dict = prepare_for_s2s_ae(amsterdam_loader=amsterdam_loader, force_refresh=True)
-            x, x_len = x_xlen_dict["test"]
-            dataset, dataloader = get_hns_dataloader(
-                x=x, x_len=x_len, device=selected_device,exp_settings=exp_settings)
-            embeddings_filepath = os.path.join(
-                os.path.abspath(embeddings_dir), 
-                exp_settings["embeddings_subdir"],
-                exp_settings["original_data_embeddings_name"]
-            )
-            embeddings = s2s_utils.get_embeddings(seq2seq=s2s, dataloaders=(dataloader,))
-            np.save(embeddings_filepath, embeddings)
-            print(f"Generated and saved embeddings of shape: {embeddings.shape}. File: {embeddings_filepath}.")
+                print("=" * 120)
 
 
 if __name__ == "__main__":

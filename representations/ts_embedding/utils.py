@@ -100,7 +100,7 @@ def _hc_repr_to_np(hc_repr):
     return hc
 
 
-def get_embeddings(seq2seq, dataloaders):
+def get_embeddings(seq2seq, dataloaders, padding_value, max_seq_len):
     """Put together the embeddings: stack horizontally the arrays of h and c; stack vertically these arrays.
     """
     hc_np_list = []
@@ -115,7 +115,12 @@ def get_embeddings(seq2seq, dataloaders):
                     hidden_size=seq2seq.encoder.hidden_size, 
                     num_rnn_layers=seq2seq.encoder.num_rnn_layers, 
                     device=x.device)
-                hc_repr = seq2seq.get_embeddings_only(x_enc=x, x_seq_lengths=x_len, hc_init=hc_init)
+                hc_repr = seq2seq.get_embeddings_only(
+                    x_enc=x, 
+                    x_seq_lengths=x_len, 
+                    hc_init=hc_init, 
+                    padding_value=padding_value, 
+                    max_seq_len=max_seq_len)
                 hc_np = _hc_repr_to_np(hc_repr)
                 hc_np_list.append(hc_np)
     hc_all = np.vstack(hc_np_list)

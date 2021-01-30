@@ -7,7 +7,7 @@ import os
 import numpy as np
 
 from generative_models.timegan import timegan
-from data.amsterdam import AmsterdamLoader, padding_mask_to_seq_lens
+from data.amsterdam import AmsterdamLoader, preprocess_data, padding_mask_to_seq_lens
 
 # ----------------------------------------------------------------------------------------------------------------------
 # Set experiment settings here:
@@ -21,10 +21,11 @@ amsterdam_data_settings = {
     "train_frac": 0.4,
     "val_frac": 0.2,
     "n_features": 70,
-    # --------------------
+    "include_time": False,
     "max_timesteps": 100,
     "pad_val": -999.,
     "data_split_seed": 12345,
+    "data_loading_force_refresh": True,
     # --------------------
     "data_path": "data/amsterdam/combined_downsampled_longitudinal_data.csv",
 }
@@ -44,9 +45,15 @@ timegan_experiment_settings = {
 # ----------------------------------------------------------------------------------------------------------------------
 # Utilities.
 
-def prepare_amsterdam(amsterdam_loader, force_refresh):
-    raw_data, padding_mask, (train_idx, val_idx, test_idx) = amsterdam_loader.load_reshape_split_data(force_refresh)
-    processed_data, imputed_processed_data = amsterdam_loader.preprocess_data(raw_data, padding_mask)
+def prepare_amsterdam(amsterdam_loader, settings):
+    raw_data, padding_mask, (train_idx, val_idx, test_idx) = \
+        amsterdam_loader.load_reshape_split_data(force_refresh=settings["data_loading_force_refresh"])
+    processed_data, imputed_processed_data = preprocess_data(
+        raw_data, 
+        padding_mask, 
+        padding_fill=settings["pad_val"],
+        time_feature_included=settings["include_time"],
+    )
     seq_lens = padding_mask_to_seq_lens(padding_mask)
     return imputed_processed_data, seq_lens
 
@@ -62,7 +69,7 @@ def main():
             seed=active_data_settings["data_split_seed"],
             train_rate=active_data_settings["train_frac"],
             val_rate=active_data_settings["val_frac"],
-            include_time=False,
+            include_time=active_data_settings["include_time"],
             debug_data=False,
             pad_before=False,
             padding_fill=active_data_settings["pad_val"],
@@ -70,7 +77,7 @@ def main():
         if use_model == "timegan":
             # Timegan doesn't take variable-length sequences, use padding value of 0.
             amsterdam_loader.padding_fill = 0.
-        original_data, seq_lens = prepare_amsterdam(amsterdam_loader=amsterdam_loader, force_refresh=True)
+        original_data, seq_lens = prepare_amsterdam(amsterdam_loader=amsterdam_loader, settings=active_data_settings)
 
     if use_model == "timegan":
         active_experiment_settings = timegan_experiment_settings
