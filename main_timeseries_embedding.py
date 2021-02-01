@@ -9,13 +9,8 @@ import numpy as np
 import torch
 import torch.optim as optim
 
-from data.amsterdam import (
-    AmsterdamLoader, 
-    preprocess_data,
-    padding_mask_to_seq_lens, 
-    convert_front_padding_to_back_padding,
-    data_division
-)
+from data import amsterdam
+from data import googlestock
 from representations.ts_embedding import Encoder, Decoder, Seq2Seq, train_seq2seq_autoencoder, iterate_eval_set
 from representations.ts_embedding import utils as s2s_utils
 
@@ -29,9 +24,10 @@ from representations.ts_embedding import utils as s2s_utils
 #     "learn:amsterdam:combined_downsampled_subset" 
 #     "learn:amsterdam:test_subset"
 #     "learn:amsterdam:hns_subset"
+#     "learn:googlestock"
 #   - Apply existing embeddings:
 #     "apply:amsterdam:hns_competition_data"
-run_experiment = "apply:amsterdam:hns_competition_data"
+run_experiment = "learn:googlestock"
 
 models_dir = "./models/"
 embeddings_dir = "./data/ts_embedding/"
@@ -57,6 +53,31 @@ experiment_settings["learn:dummy"] = {
     # --------------------
     "model_name": "s2s_ae_dummy.pt",
     "embeddings_name": "dummy_embeddings.npy"
+}
+
+# Google Stock Learn Autoencoder Experiment:
+experiment_settings["learn:googlestock"] = {
+    "train_frac": 1./3.,
+    "val_frac": 1./3.,
+    "split_order": {"train": 2, "test": 3, "val": 1},
+    "n_features": 5,
+    # --------------------
+    "include_time": False,
+    "max_timesteps": None,  # Calculated automatically.
+    "pad_val": -999.,
+    "eos_val": -777.,  
+    # NOTE: No "data_split_seed", as data is split along the time axis, no shuffling.
+    # --------------------
+    "n_epochs": 300,
+    "batch_size": 1, 
+    "hidden_size": 20,
+    "num_rnn_layers": 2,
+    "lr": 0.01,
+    # --------------------
+    "data_path_trainfile": "./data/googlestock/Google_Stock_Price_Train.csv",
+    "data_path_testfile": "./data/googlestock/Google_Stock_Price_Test.csv",
+    "model_name": "s2s_ae_googlestock.pt",
+    "embeddings_name": "googlestock_embeddings.npy"
 }
 
 # Amsterdam Data Learn Autoencoder Experiments:
@@ -180,45 +201,74 @@ experiment_settings["apply:amsterdam:hns_competition_data"] = {
 # ----------------------------------------------------------------------------------------------------------------------
 # Utilities.
 
+# General utilities.
+def make_all_dataloaders(data_dict, batch_size):
+    dataloaders_dict = dict()
+    for dataset_name, data_tensors in data_dict.items():
+        dataset, dataloader = s2s_utils.make_dataloader(
+            data_tensors=data_tensors, batch_size=batch_size, shuffle=False)
+        dataloaders_dict[dataset_name] = dataloader
+    return dataloaders_dict
+
+
+def prep_datasets_for_s2s_ae_training(x_xlen_dict, device, pad_val, eos_val):
+    data_dict = dict()
+    for key in ("train", "val", "test"):
+        x, x_len = x_xlen_dict[key]
+        x_rev, x_rev_shifted = s2s_utils.rearrange_data(x, x_len, pad_val, eos_val)
+        data_dict[key] = s2s_utils.data_to_tensors(
+            x, x_len, x_rev, x_rev_shifted, float_type=torch.float32, device=device)
+    return data_dict
+
+
+# Google stock data utilities.
+
+def add_sample_dim(*arrays):
+    results = []
+    for arr in arrays:
+        assert len(arr.shape) == 2
+        results.append(np.expand_dims(arr, axis=0))
+    return tuple(results)
+
+
+def get_fixed_seq_lens(*arrays):
+    results = []
+    for arr in arrays:
+        assert len(arr.shape) == 3
+        results.append(np.full((arr.shape[0],), arr.shape[1]))
+    return tuple(results)
+
+
+def pad_to_max_seq_len(arrays, max_seq_len, pad_val):
+    results = []
+    for arr in arrays:
+        assert len(arr.shape) == 3
+        arr_ = np.full((arr.shape[0], max_seq_len, arr.shape[2]), pad_val)
+        for idx in range(arr.shape[0]):
+            arr_[idx, :arr.shape[1], :] = arr[idx, :, :]
+        results.append(arr_)
+    return tuple(results)
+
+
 # Amsterdam data utilities.
 
-def prepare_for_s2s_ae_amsterdam(amsterdam_loader, settings):
+def load_and_prep_amsterdam(amsterdam_loader, settings):
     assert amsterdam_loader.pad_before == False
     raw_data, padding_mask, (train_idx, val_idx, test_idx) = \
         amsterdam_loader.load_reshape_split_data(force_refresh=settings["data_loading_force_refresh"])
-    processed_data, imputed_processed_data = preprocess_data(
+    processed_data, imputed_processed_data = amsterdam.preprocess_data(
         raw_data, 
         padding_mask, 
         padding_fill=settings["pad_val"],
         time_feature_included=settings["include_time"],
     )
-    seq_lens = padding_mask_to_seq_lens(padding_mask)
+    seq_lens = amsterdam.padding_mask_to_seq_lens(padding_mask)
     data = {
         "train": (imputed_processed_data[train_idx], seq_lens[train_idx]),
         "val": (imputed_processed_data[val_idx], seq_lens[val_idx]),
         "test": (imputed_processed_data[test_idx], seq_lens[test_idx]),
     }
     return data
-
-
-def make_all_dataloaders(data_dict, exp_settings):
-    dataloaders_dict = dict()
-    for dataset_name, data_tensors in data_dict.items():
-        dataset, dataloader = s2s_utils.make_dataloader(
-            data_tensors=data_tensors, batch_size=exp_settings["batch_size"], shuffle=False)
-        dataloaders_dict[dataset_name] = dataloader
-    return dataloaders_dict
-
-
-def prepare_all_amsterdam_data(x_xlen_dict, device, exp_settings):
-    data_dict = dict()
-    for key in ("train", "val", "test"):
-        x, x_len = x_xlen_dict[key]
-        x_rev, x_rev_shifted = s2s_utils.rearrange_data(
-            x, x_len, exp_settings["pad_val"], exp_settings["eos_val"])
-        data_dict[key] = s2s_utils.data_to_tensors(
-            x, x_len, x_rev, x_rev_shifted, float_type=torch.float32, device=device)
-    return data_dict
 
 
 # Dummy data utilities.
@@ -261,8 +311,8 @@ def _check_padding_mask_integrity(padding_mask):
 def _coerce_hns_data_to_s2s_ae_format(data, padding_mask, pad_val):
     if padding_mask.shape != (0,):
         # Has a padding mask case.
-        seq_lens = padding_mask_to_seq_lens(padding_mask=padding_mask)
-        data = convert_front_padding_to_back_padding(data=data, seq_lens=seq_lens, pad_val=pad_val)
+        seq_lens = amsterdam.padding_mask_to_seq_lens(padding_mask=padding_mask)
+        data = amsterdam.convert_front_padding_to_back_padding(data=data, seq_lens=seq_lens, pad_val=pad_val)
     else:
         # No padding mask case, all seq_lens are max length.
         seq_lens = np.array([data.shape[1]] * data.shape[0]).astype(int)
@@ -287,7 +337,7 @@ def prepare_for_s2s_ae_hns(amsterdam_loader, settings):
     # ^ The dataset used in H&S competition.
 
     # Now get the split for autoencoder training:
-    _, (train_idx, val_idx, test_idx) = data_division(
+    _, (train_idx, val_idx, test_idx) = amsterdam.data_division(
         hns_raw_data, 
         seed=settings["data_split_seed"], 
         divide_rates=[
@@ -298,7 +348,7 @@ def prepare_for_s2s_ae_hns(amsterdam_loader, settings):
     )
 
     # Preprocess.
-    _, hns_imputed_processed_data = preprocess_data(
+    _, hns_imputed_processed_data = amsterdam.preprocess_data(
         data=hns_raw_data, 
         padding_mask=hns_padding_mask, 
         padding_fill=settings["data_load"]["pad_val"],
@@ -335,7 +385,7 @@ def prepare_hns_gen_data(hider_name, exp_settings):
     print(f"hider '{hider_name}' padding_mask checked {note}")
 
     # Preprocess.
-    _, generated_data = preprocess_data(
+    _, generated_data = amsterdam.preprocess_data(
         data=generated_data, 
         padding_mask=padding_mask if padding_mask.shape != (0,) else None, 
         padding_fill=exp_settings["pad_val"],
@@ -373,12 +423,55 @@ def main():
 
         if run_experiment == "learn:dummy":
             data_dict = generate_all_dummy_data(device=selected_device)
-            dataloaders_dict = make_all_dataloaders(data_dict, exp_settings=exp_settings)
+            dataloaders_dict = make_all_dataloaders(data_dict, batch_size=exp_settings["batch_size"])
+        
+        elif run_experiment == "learn:googlestock":
+            # Load and split:
+            data = googlestock.load_stock_data(
+                train_path=exp_settings["data_path_trainfile"], 
+                test_path=exp_settings["data_path_testfile"], 
+                normalize=True, 
+                time=False
+            )
+            d_train, d_val, d_test = googlestock.split_stock_data(
+                data, 
+                frac_train=exp_settings["train_frac"], 
+                frac_val=exp_settings["val_frac"], 
+                split_order=exp_settings["split_order"]
+            )
+            # Dynamically compute max_seq_len:
+            max_timesteps = max((d_train.shape[0], d_val.shape[0], d_test.shape[0]))
+            total_timesteps = sum((d_train.shape[0], d_val.shape[0], d_test.shape[0]))
+            exp_settings["max_timesteps"] = max_timesteps
+            print(f"`max_timesteps` computed: {max_timesteps}")
+            # Preprocess for autoencoder:
+            d_train, d_val, d_test = \
+                add_sample_dim(d_train, d_val, d_test)  # pylint: disable=unbalanced-tuple-unpacking
+            d_train_len, d_val_len, d_test_len = \
+                get_fixed_seq_lens(d_train, d_val, d_test)  # pylint: disable=unbalanced-tuple-unpacking
+            d_train, d_val, d_test = pad_to_max_seq_len(  # pylint: disable=unbalanced-tuple-unpacking
+                arrays=(d_train, d_val, d_test), 
+                max_seq_len=exp_settings["max_timesteps"], 
+                pad_val=exp_settings["pad_val"]
+            )
+            x_xlen_dict = {
+                "train": (d_train, d_train_len),
+                "val": (d_val, d_val_len),
+                "test": (d_test, d_test_len),
+            }
+            data_dict = prep_datasets_for_s2s_ae_training(
+                x_xlen_dict=x_xlen_dict, 
+                device=selected_device, 
+                pad_val=exp_settings["pad_val"], 
+                eos_val=exp_settings["eos_val"]
+            )
+            dataloaders_dict = make_all_dataloaders(data_dict=data_dict, batch_size=exp_settings["batch_size"])
+
         elif (
             run_experiment == "learn:amsterdam:combined_downsampled_subset" or 
             run_experiment == "learn:amsterdam:test_subset"
         ):
-            amsterdam_loader = AmsterdamLoader(
+            amsterdam_loader = amsterdam.AmsterdamLoader(
                 data_path=os.path.abspath(exp_settings["data_path"]),
                 max_seq_len=exp_settings["max_timesteps"],
                 seed=exp_settings["data_split_seed"],
@@ -389,15 +482,21 @@ def main():
                 pad_before=False,
                 padding_fill=exp_settings["pad_val"],
             )
-            x_xlen_dict = prepare_for_s2s_ae_amsterdam(
+            x_xlen_dict = load_and_prep_amsterdam(
                 amsterdam_loader=amsterdam_loader, 
                 settings=exp_settings,
             )
-            data_dict = prepare_all_amsterdam_data(x_xlen_dict, device=selected_device, exp_settings=exp_settings)
-            dataloaders_dict = make_all_dataloaders(data_dict, exp_settings=exp_settings)
+            data_dict = prep_datasets_for_s2s_ae_training(
+                x_xlen_dict, 
+                device=selected_device, 
+                pad_val=exp_settings["pad_val"],
+                eos_val=exp_settings["eos_val"],
+            )
+            dataloaders_dict = make_all_dataloaders(data_dict, batch_size=exp_settings["batch_size"])
+        
         elif run_experiment == "learn:amsterdam:hns_subset":
             # This loader matches the H&S competition data loading settings.
-            amsterdam_loader = AmsterdamLoader(
+            amsterdam_loader = amsterdam.AmsterdamLoader(
                 data_path=os.path.abspath(exp_settings["data_path"]),
                 max_seq_len=exp_settings["data_load"]["max_timesteps"],
                 seed=exp_settings["data_load"]["data_split_seed"],
@@ -412,8 +511,13 @@ def main():
                 amsterdam_loader=amsterdam_loader, 
                 settings=exp_settings,
             )
-            data_dict = prepare_all_amsterdam_data(x_xlen_dict, device=selected_device, exp_settings=exp_settings)
-            dataloaders_dict = make_all_dataloaders(data_dict, exp_settings=exp_settings)
+            data_dict = prep_datasets_for_s2s_ae_training(
+                x_xlen_dict, 
+                device=selected_device, 
+                pad_val=exp_settings["pad_val"],
+                eos_val=exp_settings["eos_val"],
+            )
+            dataloaders_dict = make_all_dataloaders(data_dict, batch_size=exp_settings["batch_size"])
         
         encoder = Encoder(
             input_size=exp_settings["n_features"], 
@@ -453,10 +557,14 @@ def main():
         torch.save(s2s.state_dict(), model_filepath)
 
         # Save embeddings.
+        if run_experiment == "learn:googlestock":
+            dls = (dataloaders_dict["test"],)  # NOTE: Could alternatively use full sequence.
+        else:
+            dls = (dataloaders_dict["train"], dataloaders_dict["val"], dataloaders_dict["test"])
         embeddings_filepath = os.path.join(os.path.abspath(embeddings_dir), exp_settings["embeddings_name"])
         embeddings = s2s_utils.get_embeddings(
             seq2seq=s2s, 
-            dataloaders=(dataloaders_dict["train"], dataloaders_dict["val"], dataloaders_dict["test"]),
+            dataloaders=dls,
             padding_value=exp_settings["pad_val"],
             max_seq_len=exp_settings["max_timesteps"]
         )

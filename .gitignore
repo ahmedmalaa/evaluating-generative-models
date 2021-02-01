@@ -120,8 +120,8 @@ data/*
 !data/__init__.py
 data/amsterdam/*
 !data/amsterdam/*.py
-data/google_stock/*
-!data/google_stock/*.py
+data/googlestock/*
+!data/googlestock/*.py
 data/ts_embedding/*
 !data/ts_embedding/*.py
 data/ts_generated/*
