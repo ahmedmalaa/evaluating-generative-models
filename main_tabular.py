@@ -16,18 +16,25 @@ from sklearn.svm import SVC
 from sklearn.naive_bayes import GaussianNB
 
 import matplotlib.pyplot as plt
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 
 import pandas as pd
 import numpy as np
 import torch
 import tensorflow as tf
-import os
+
 
 import pickle
 import time
 import glob
 
 from representations.OneClass import OneClassLayer
+
+if torch.cuda.is_available():
+    device = 'cuda'
+else:
+    device = 'cpu'
 
 
 
@@ -41,6 +48,63 @@ from generative_models.vae import vae
 from metrics.combined import compute_metrics
 import metrics.prd_score as prd
 from main_image import get_activation
+from audit import audit
+
+#%% constants and settings
+methods = ['adsgan', 'wgan', 'vae', 'gan']
+dataset = 'covid'
+
+original_data_dir = 'data/tabular/original'
+synth_data_dir = 'data/tabular/synth'
+visual_dir = 'visualisations'
+
+
+
+debug_train = False
+debug_metrics = False
+just_metrics = False
+
+
+#Save synthetic data iff we're training
+# Train generative models
+do_train = True
+save_synth = False
+# just relevant for ADS-GAN
+
+
+# Train OneClass representation model
+train_OC = False
+# If train is true, save new model (overwrites old OC model)
+save_OC = False
+ 
+which_metric = [['ID','OC','WD','FD', 'parzen', 'PRDC'],['OC']]
+    
+
+
+
+tf.random.set_seed(2021)
+np.random.seed(2021)
+
+
+# OneClass representation model
+OC_params  = dict({"rep_dim": 32, 
+                "num_layers": 3, 
+                "num_hidden": 128, 
+                "activation": "ReLU",
+                "dropout_prob": 0.5, 
+                "dropout_active": False,
+                "LossFn": "SoftBoundary",
+                "lr": 2e-3,
+                "epochs": 5000,
+                "warm_up_epochs" : 10,
+                "train_prop" : 0.8,
+                "weight_decay": 1e-2})   
+
+
+lambda_ = 0.1
+
+OC_hyperparams = dict({"Radius": 1, "nu": 1e-2})
+
 
 
 #%% Data loading
@@ -131,14 +195,14 @@ def feature_importance_comparison(X, Y, method_names=None):
     
     if method_names is not None:
         bar_comparison(importances, 
-                   stds, labels=method_names, tick_names = X[0].columns, z_name = 'all_feat_importance')
+                   stds, labels=method_names, tick_names = X[0].columns, save_name = 'all_feat_importance')
 
     return [importances, stds]
 
 
 
 
-def cv_predict_scores(X, y, classifier, n_splits=6):
+def cv_predict_scores(X, y, classifier, n_splits=5):
     """
     Computes CV accuracy and AUROC
     
@@ -266,10 +330,11 @@ def predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y, method_name=No
                        [std_aucs, std_synth_aucs, std_transf_aucs], 
                        tick_names=model_names, save_name = f'{method_name}_pred_aucs')
         
-    return {'acc':[[accs,synth_accs, transf_accs],
-                   [std_accs,std_synth_accs, std_transf_accs]]
-            ,'auc':[[aucs,synth_aucs, transf_aucs],
-                    [std_aucs,std_synth_aucs, std_transf_aucs]]}
+    return {'acc':{'original':accs,'synthetic':synth_accs, 'transfer': transf_accs},
+            'std_acc': {'original': std_accs, 'synthetic': std_synth_accs, 'transfer':std_transf_accs},
+            'auc':{'original':aucs,'synthetic':synth_aucs, 'transfer': transf_aucs},
+            'std_auc': {'original': std_aucs, 'synthetic': std_synth_aucs, 'transfer':std_transf_aucs}}
+            
                 
 
     
@@ -374,71 +439,20 @@ def roc(X, y, classifier, n_splits=6, pos_label = 2):
 
 #%%  
 # Set settings:
-dataset = 'ts'
-#method = 'adsgan' #adsgan, wgan, gan, vae
 
-original_data_dir = 'data/tabular/original'
-synth_data_dir = 'data/tabular/synth'
-visual_dir = 'visualisations'
+from main_image import plot_all
 
-
-
-debug_train = False
-debug_metrics = False
-just_metrics = True
-
-#Save synthetic data iff we're training
-# Train generative models
-do_train = True
-save_synth = False
-train_ratio = 0.8
-# just relevant for ADS-GAN
-lambda_ = 1
-
-# Train OneClass representation model
-train_OC = False
-# If train is true, save new model (overwrites old OC model)
-save_OC = True
- 
-which_metric = [['ID','OC'],['OC']]
-    
-
-
-
-tf.random.set_seed(2021)
-np.random.seed(2021)
-
-
-# OneClass representation model
-OC_params  = dict({"rep_dim": 32, 
-                "num_layers": 2, 
-                "num_hidden": 200, 
-                "activation": "ReLU",
-                "dropout_prob": 0.5, 
-                "dropout_active": False,
-                "LossFn": "SoftBoundary",
-                "lr": 1e-3,
-                "epochs": 5000,
-                "warm_up_epochs" : 10,
-                "train_prop" : 0.8,
-                "weight_decay": 1e-2})   
-
-
-
-OC_hyperparams = dict({"Radius": 1, "nu": 1e-2})
-
-#if dataset != 'mnist':
-methods = ['adsgan']#, 'pategan'] 
-#else:
     
 def main_from_files(OC_params, OC_hyperparams):
     if dataset == 'mnist':
         orig_data = load_mnist_data('data/mnist/original/testing')
-
+    
     elif dataset == 'ts':
         orig_data = np.load(glob.glob('data/ts/original/*')[0])
         synth_files = glob.glob('data/ts/synthetic/*')
     
+    print('Shape original data:', orig_data.shape)
+
     OC_filename = f'metrics/OC_model_{dataset}.pkl'    
     if train_OC or not os.path.exists(OC_filename):
         print('### Training OC embedding model')
@@ -461,12 +475,9 @@ def main_from_files(OC_params, OC_hyperparams):
         
     # parameters for generative models
     params = dict()
-    if debug_train: 
-        params['iterations'] = 10
-    else:
-        params["iterations"] = 2000
+    params["iterations"] = 2000
     params["h_dim"] = 200
-    params["z_dim"] = 20
+    params["z_dim"] = 32
     params["mb_size"] = 128
 
     
@@ -510,6 +521,106 @@ def get_OC_model(OC_filename, train_OC, X=None, OC_params=None, OC_hyperparams=N
     OC_model.eval()
     return OC_model, OC_params, OC_hyperparams
     
+def experiment_audit(OC_params, OC_hyperparams):
+    plt.close('all')
+
+    # Load data
+    if dataset == 'bc':
+        orig_data = load_breast_cancer_data()  
+    elif dataset == 'covid':
+        orig_data = load_covid_data()  
+    else:
+        raise ValueError('Not a valid dataset name given')
+    
+    
+    OC_params['input_dim'] = orig_data.shape[1]
+    print(orig_data.shape)
+    n_orig = orig_data.shape[0]
+    
+    OC_filename = f'metrics/OC_model_{dataset}.pkl'    
+    OC_model,OC_params, OC_hyperparams = get_OC_model(OC_filename, train_OC, orig_data.to_numpy(), OC_params, OC_hyperparams)
+    
+    # parameters for generative models
+    params = dict()
+    params["iterations"] = 2000
+    params["h_dim"] = 100
+    params["z_dim"] = 10
+    params["mb_size"] = 128
+    
+    method = 'adsgan'    
+    params['gen_model_name'] = method
+    params['lambda'] = 1
+    
+    
+    synth_data = audit(orig_data, params, OC_model)
+    print('Shape after auditing:',synth_data.shape)
+
+    results_after_auditing = compute_metrics(orig_data.to_numpy(), synth_data, 
+                                        which_metric = which_metric, 
+                                        wd_params = params, model=OC_model)
+    
+    
+    
+
+    return results_after_auditing, synth_data
+
+
+
+
+
+def experiment_lambda_adsgan(OC_params, OC_hyperparams, lambdas=None):
+    plt.close('all')
+    if lambdas is None:
+        lambdas = np.exp(np.arange(-3,3,0.2))
+        lambdas[0] = 0
+    # Load data
+    if dataset == 'bc':
+        orig_data = load_breast_cancer_data()  
+    elif dataset == 'covid':
+        orig_data = load_covid_data()  
+    else:
+        raise ValueError('Not a valid dataset name given')
+    
+    
+    OC_params['input_dim'] = orig_data.shape[1]
+    print(orig_data.shape)
+    OC_filename = f'metrics/OC_model_{dataset}.pkl'    
+    OC_model,OC_params, OC_hyperparams = get_OC_model(OC_filename, train_OC, orig_data.to_numpy(), OC_params, OC_hyperparams)
+        
+    # parameters for generative models
+    params = dict()
+    params["iterations"] = 2000
+    params["h_dim"] = 200
+    params["z_dim"] = 10
+    params["mb_size"] = 128
+    params['lambda_tester'] = True
+        
+    all_results = []
+    
+    
+    method = 'adsgan'    
+    params['gen_model_name'] = method
+
+    for lambda_ in lambdas:
+        
+        print('Lambda is ',lambda_)
+        params["lambda"] = lambda_
+        synth_data = adsgan(orig_data, params)
+            
+    
+        print('#### Computing static metrics')
+        results_metrics = compute_metrics(orig_data.to_numpy(), synth_data, 
+                                          which_metric = which_metric, 
+                                          wd_params = params, model=OC_model)
+        
+        
+        all_results.append(results_metrics)
+    
+    plot_all(lambdas, all_results, r'$\lambda$',name='ads-gan_lambda_test_'+dataset)
+    
+    return all_results
+
+
 
 def main(OC_params, OC_hyperparams):
     plt.close('all')
@@ -524,42 +635,35 @@ def main(OC_params, OC_hyperparams):
         raise ValueError('Not a valid dataset name given')
     
     # Some different data definitions
-    orig_train_index = round(len(orig_data)*train_ratio)
+    #orig_train_index = round(len(orig_data)*train_ratio)
     orig_X, orig_Y = orig_data.drop(columns=['target']), orig_data.target
-    #orig_X_train, orig_X_test = orig_X[:orig_train_index], orig_X[orig_train_index:]
-    #orig_Y_train, orig_Y_test = orig_Y[:orig_train_index], orig_Y[orig_train_index:]
     
     OC_params['input_dim'] = orig_data.shape[1]
     OC_filename = f'metrics/OC_model_{dataset}.pkl'    
-    OC_model,OC_params, OC_hyperparams = get_OC_model(OC_filename, train_OC, X=None, OC_params=None, OC_hyperparams=None)
+    OC_model,OC_params, OC_hyperparams = get_OC_model(OC_filename, train_OC, orig_data.to_numpy(), OC_params, OC_hyperparams)
         
     # parameters for generative models
     params = dict()
-    if debug_train: 
-        params['iterations'] = 10
-    else:
-        params["iterations"] = 2000
+    params["iterations"] = 2000
     params["h_dim"] = 200
-    params["z_dim"] = 20
+    params["z_dim"] = 10
     params["mb_size"] = 128
         
-    all_results = []
-    X = [orig_X]
-    Y = [orig_Y]
-    
-    
-    
+    metric_results = {}
+    pred_perf = {}
+    X, Y = [orig_data.drop(columns=['target'])], [np.array(orig_data.target, dtype='bool')]
+    print(np.unique(np.array(orig_data.target)))
     for method in methods:
         print(f'\n============== {method} ==============')
         filename =  f'{synth_data_dir}/{dataset}_{method}.csv'
         
         params['gen_model_name'] = method
         
-        print('Lambda is ',lambda_)
         if method != 'adsgan':
             params['lambda'] = 0
         else:
             params["lambda"] = lambda_
+        print('Lambda is ',lambda_)
         
     
         # Synthetic data generation
@@ -589,15 +693,11 @@ def main(OC_params, OC_hyperparams):
         else:
             synth_data, params = pickle.load(open(filename,'rb'))
         
-        if debug_train:
-            return synth_data
+        for i in range(synth_data.shape[1]):
+            if len(np.unique(orig_data.to_numpy()[:, i])) == 2:
+                synth_data[:, i] = np.array(np.round(synth_data[:, i]), dtype='int')
     
-        ## Performance measures from ADS-GAN paper, FID and Parzen
-        if debug_metrics:
-            print('Debugging metrics: only using 100 samples')
-            orig_data = orig_data.loc[:100]
-            synth_data = synth_data[:100]
-        
+
         print('#### Computing static metrics')
         results_metrics = compute_metrics(orig_data.to_numpy(), synth_data, 
                                           which_metric=which_metric, 
@@ -609,11 +709,13 @@ def main(OC_params, OC_hyperparams):
             alpha = results_metrics['alphas']
             prc_curves.append([alpha, apc])
         
-        synth_data = pd.DataFrame(synth_data,columns = orig_data.columns)
-    
-    
-          
+        metric_results[method] = results_metrics
+        
+
+
+        synth_data = pd.DataFrame(synth_data,columns = orig_data.columns)  
         synth_X, synth_Y = synth_data.drop(columns=['target']), synth_data.target
+        
         X.append(synth_X)
         Y.append(synth_Y)
         # synth_train_index = round(len(synth_data)*train_ratio)
@@ -630,29 +732,43 @@ def main(OC_params, OC_hyperparams):
         print('#### Computing predictive metrics')
         
         if debug_metrics or just_metrics:
-            pred_perf = None
+            pred_perf[method] = None
         else:
-            pred_perf = predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y, method_name=method)
-        
-        # example of ROC computation
-        #roc(synth_X, synth_Y, LogisticRegression())
+            pred_perf[method] = predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y, method_name=method)
         
         
-        ### Feature importance between orig and synth data
-        all_results.append([results_metrics, pred_perf])
-    
-    if debug_metrics or debug_train or just_metrics:
-        return all_results
+        
+    if just_metrics:
+        return metric_results
         
     feat_imp = feature_importance_comparison(X,Y, method_names=['orig']+methods)
     
-    if 'OC' in which_metric[1]:
-        prd.plot([prc_curves], out_path=None)
+    #if 'OC' in which_metric[1]:
+    #    prd.plot([prc_curves], out_path=None)
 
-    return all_results
+    results={'metric_results': metric_results}
+    results['pred_perf'] = pred_perf
+    results['feat_imp'] = feat_imp
+    return results, [X,Y]
+
+
 
 if __name__ == '__main__':
-    results = main_from_files(OC_params, OC_hyperparams)
-        #for lambda_ in np.exp(np.arange(-4,-2,0.5)):
-    #    all_results = main(OC_params, OC_hyperparams)
-    #pickle.dump(all_results, open(f'metrics/results{round(time.time())}.pkl','wb'))
+    # Normal tabular data
+    #results, synth_data = main(OC_params, OC_hyperparams)
+    #pickle.dump(synth_data, open(f'results/synth_data{dataset}{round(time.time())}.pkl','wb'))
+    
+    #pickle.dump(results, open(f'results/{dataset}{round(time.time())}.pkl','wb'))
+    
+    results_audit, synth_audit = experiment_audit(OC_params, OC_hyperparams)
+    pickle.dump(results_audit, open(f'results/audit_{dataset}{round(time.time())}.pkl','wb'))
+    pickle.dump(synth_audit, open(f'results/data_synth_audit_{dataset}{round(time.time())}.pkl','wb'))
+    
+    
+    # lamba experiment
+    #results_lamb = experiment_lambda_adsgan(OC_params, OC_hyperparams, lambdas=None)
+    #pickle.dump(results_lamb, open(f'results/{dataset}{round(time.time())}.pkl','wb'))
+    
+    
+    #results = main_from_files(OC_params, OC_hyperparams)
+    
