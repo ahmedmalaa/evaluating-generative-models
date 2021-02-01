@@ -127,4 +127,8 @@ data/ts_embedding/*
 data/ts_generated/*
 !data/ts_generated/*.py
 data/mnist/*
-!data/mnist/*
+!data/mnist/*.py
+data/tabular/original/*
+!data/tabular/original/*.py
+data/tabular/synth/*
+!data/tabular/synth/*.py

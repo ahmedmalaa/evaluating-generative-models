@@ -1,3 +1,10 @@
+# pylint: disable=redefined-outer-name
+
+import os
+import pickle
+import time  # pylint: disable=unused-import
+import glob
+
 # for predictive tasks
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
@@ -11,21 +18,17 @@ from sklearn.svm import SVC
 from sklearn.naive_bayes import GaussianNB
 
 import matplotlib.pyplot as plt
-import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 
 import pandas as pd
 import numpy as np
+
 import torch
 import tensorflow as tf
 
-
-import pickle
-import time
-import glob
-
 from representations.OneClass import OneClassLayer
+import utils
 
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 if torch.cuda.is_available():
     device = 'cuda'
 else:
@@ -39,13 +42,21 @@ from generative_models.gan import gan
 from generative_models.pategan import pategan
 from generative_models.vae import vae
 
-
 from metrics.combined import compute_metrics
-import metrics.prd_score as prd
-from main_image import get_activation
+import metrics.prd_score as prd  # pylint: disable=unused-import
+
 from audit import audit
 
-#%% constants and settings
+if utils.check_tf2():
+    from main_image import get_activation
+    from main_image import plot_all
+else:
+    print("TF2 not found, cannot import from main_image")
+
+#%% Constants and settings
+
+run_experiment = "main"  # Options: ("main", "main_from_files", "lambda", "audit",)
+
 methods = ['adsgan', 'wgan', 'vae', 'gan']
 dataset = 'covid'
 
@@ -60,7 +71,7 @@ debug_metrics = False
 just_metrics = False
 
 
-#Save synthetic data iff we're training
+# Save synthetic data iff we're training
 # Train generative models
 do_train = True
 save_synth = False
@@ -75,28 +86,35 @@ save_OC = False
 which_metric = [['ID','OC','WD','FD', 'parzen', 'PRDC'],['OC']]
 
 
-tf.random.set_seed(2021)
+if utils.check_tf2():
+    tf.random.set_seed(2021)
+else:
+    tf.compat.v1.set_random_seed(2021)
 np.random.seed(2021)
 
 
 # OneClass representation model
-OC_params  = dict({"rep_dim": None, 
-                "num_layers": 4, 
-                "num_hidden": 32, 
-                "activation": "ReLU",
-                "dropout_prob": 0.2, 
-                "dropout_active": False,
-                "LossFn": "SoftBoundary",
-                "lr": 2e-3,
-                "epochs": 1000,
-                "warm_up_epochs" : 20,
-                "train_prop" : 1.0,
-                "weight_decay": 2e-3})   
-
+OC_params  = {
+    "rep_dim": None, 
+    "num_layers": 4, 
+    "num_hidden": 32, 
+    "activation": "ReLU",
+    "dropout_prob": 0.2, 
+    "dropout_active": False,
+    "LossFn": "SoftBoundary",
+    "lr": 2e-3,
+    "epochs": 1000,
+    "warm_up_epochs" : 20,
+    "train_prop" : 1.0,
+    "weight_decay": 2e-3
+}   
 
 lambda_ = 0.1
 
-OC_hyperparams = dict({"Radius": 1, "nu": 1e-2})
+OC_hyperparams = {
+    "Radius": 1, 
+    "nu": 1e-2
+}
 
 
 
@@ -370,7 +388,7 @@ def bar_comparison(vectors, std=None, labels=None, tick_names=None, save_name = 
     plt.show()
 
 
-def roc(X, y, classifier, n_splits=6, pos_label = 2):
+def roc(X, y, classifier, n_splits=6, pos_label = 2):  # pylint: disable=unused-argument
     cv = StratifiedKFold(n_splits=n_splits)
     
     tprs = []
@@ -424,8 +442,6 @@ def roc(X, y, classifier, n_splits=6, pos_label = 2):
 
 #%%  
 # Set settings:
-
-from main_image import plot_all
 
     
 def main_from_files(OC_params, OC_hyperparams):
@@ -505,7 +521,8 @@ def get_OC_model(OC_filename, train_OC, X=None, OC_params=None, OC_hyperparams=N
     
     OC_model.eval()
     return OC_model, OC_params, OC_hyperparams
-    
+
+
 def experiment_audit(OC_params, OC_hyperparams):
     plt.close('all')
 
@@ -607,7 +624,8 @@ def main(OC_params, OC_hyperparams):
     plt.close('all')
     
     prc_curves = []
-        # Load data
+    
+    # Load data
     if dataset == 'bc':
         orig_data = load_breast_cancer_data()  
     elif dataset == 'covid':
@@ -644,7 +662,7 @@ def main(OC_params, OC_hyperparams):
             params['lambda'] = 0
         else:
             params["lambda"] = lambda_
-        print('Lambda is ',lambda_)
+        print('Lambda is ', lambda_)
         
     
         # Synthetic data generation
@@ -660,10 +678,10 @@ def main(OC_params, OC_hyperparams):
             elif method == 'adsgan':
                 synth_data = adsgan(orig_data, params)
             elif method == 'pategan':
-                params_pate = {'n_s': 1, 'batch_size': 128, 
-                     'k': 100, 'epsilon': 100, 'delta': 0.0001, 'lambda': 1}
-                
-            
+                params_pate = {
+                    'n_s': 1, 'batch_size': 128, 
+                    'k': 100, 'epsilon': 100, 'delta': 0.0001, 'lambda': 1
+                }
                 synth_data = pategan(orig_data.to_numpy(), params_pate)  
             elif method=='vae':
                 synth_data = vae(orig_data, params)
@@ -735,21 +753,23 @@ def main(OC_params, OC_hyperparams):
 
 
 if __name__ == '__main__':
-    # Normal tabular data
-    #results, synth_data = main(OC_params, OC_hyperparams)
-    #pickle.dump(synth_data, open(f'results/synth_data{dataset}{round(time.time())}.pkl','wb'))
+
+    if run_experiment == "main":
+        # Normal tabular data:
+        results, synth_data = main(OC_params, OC_hyperparams)
+        pickle.dump(synth_data, open(f'results/synth_data{dataset}{round(time.time())}.pkl','wb'))
+        pickle.dump(results, open(f'results/{dataset}{round(time.time())}.pkl','wb'))
     
-    #pickle.dump(results, open(f'results/{dataset}{round(time.time())}.pkl','wb'))
+    elif run_experiment == "audit":
+        # Audit experiment:
+        results_audit, synth_audit = experiment_audit(OC_params, OC_hyperparams)
+        pickle.dump(results_audit, open(f'results/audit_{dataset}{round(time.time())}.pkl','wb'))
+        pickle.dump(synth_audit, open(f'results/data_synth_audit_{dataset}{round(time.time())}.pkl','wb'))
     
-    #results_audit, synth_audit = experiment_audit(OC_params, OC_hyperparams)
-    #pickle.dump(results_audit, open(f'results/audit_{dataset}{round(time.time())}.pkl','wb'))
-    #pickle.dump(synth_audit, open(f'results/data_synth_audit_{dataset}{round(time.time())}.pkl','wb'))
+    elif run_experiment == "lambda":
+        # Lambda experiment:
+        results_lamb = experiment_lambda_adsgan(OC_params, OC_hyperparams, lambdas=None)
+        pickle.dump(results_lamb, open(f'results/{dataset}{round(time.time())}.pkl','wb'))    
     
-    
-    # lamba experiment
-    results_lamb = experiment_lambda_adsgan(OC_params, OC_hyperparams, lambdas=None)
-    pickle.dump(results_lamb, open(f'results/{dataset}{round(time.time())}.pkl','wb'))
-    
-    
-    #results = main_from_files(OC_params, OC_hyperparams)
-    
+    elif run_experiment == "main_from_files":
+        results = main_from_files(OC_params, OC_hyperparams)
