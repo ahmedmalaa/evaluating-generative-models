@@ -47,7 +47,7 @@ from audit import audit
 
 #%% constants and settings
 methods = ['adsgan', 'wgan', 'vae', 'gan']
-dataset = 'bc'
+dataset = 'covid'
 
 original_data_dir = 'data/tabular/original'
 synth_data_dir = 'data/tabular/synth'
@@ -81,17 +81,17 @@ np.random.seed(2021)
 
 # OneClass representation model
 OC_params  = dict({"rep_dim": None, 
-                "num_layers": 2, 
-                "num_hidden": 128, 
+                "num_layers": 4, 
+                "num_hidden": 32, 
                 "activation": "ReLU",
-                "dropout_prob": 0.5, 
+                "dropout_prob": 0.2, 
                 "dropout_active": False,
                 "LossFn": "SoftBoundary",
                 "lr": 2e-3,
-                "epochs": 5000,
-                "warm_up_epochs" : 10,
-                "train_prop" : 0.8,
-                "weight_decay": 1e-2})   
+                "epochs": 1000,
+                "warm_up_epochs" : 20,
+                "train_prop" : 1.0,
+                "weight_decay": 2e-3})   
 
 
 lambda_ = 0.1
@@ -118,8 +118,9 @@ def load_covid_data():
     df.rename(columns={'is_dead':'target'},inplace=True)
     # drop redundant columns that are contained in other columns
     df = df.drop(columns=['Sex','Race','SG_UF_NOT','Age_40','Age_40_50',
-                      'Age_50_60','Age_60_70','Age_70'])
+                      'Age_50_60','Age_60_70','Age_70','Branca'])
     X = MinMaxScaler().fit_transform(df)
+    
     df = pd.DataFrame(X,columns = df.columns)
     return df
 
@@ -488,7 +489,7 @@ def get_OC_model(OC_filename, train_OC, X=None, OC_params=None, OC_hyperparams=N
         if OC_params['rep_dim'] is None:
             OC_params['rep_dim'] = X.shape[1]
         # Check center definition !
-        OC_hyperparams['center'] = torch.ones(OC_params['rep_dim'])*10
+        OC_hyperparams['center'] = torch.ones(OC_params['rep_dim'])#*10
         
         OC_model = OneClassLayer(params=OC_params, 
                                  hyperparams=OC_hyperparams)
@@ -526,7 +527,7 @@ def experiment_audit(OC_params, OC_hyperparams):
     
     # parameters for generative models
     params = dict()
-    params["iterations"] = 200
+    params["iterations"] = 2000
     params["h_dim"] = 100
     params["z_dim"] = 10
     params["mb_size"] = 128
@@ -594,7 +595,7 @@ def experiment_lambda_adsgan(OC_params, OC_hyperparams, lambdas=None):
                                           which_metric = which_metric, 
                                           wd_params = params, model=OC_model)
         
-        
+        results_metrics['lambda'] = lambda_
         all_results.append(results_metrics)
     
     plot_all(lambdas, all_results, r'$\lambda$',name='ads-gan_lambda_test_'+dataset)
@@ -740,14 +741,14 @@ if __name__ == '__main__':
     
     #pickle.dump(results, open(f'results/{dataset}{round(time.time())}.pkl','wb'))
     
-    results_audit, synth_audit = experiment_audit(OC_params, OC_hyperparams)
-    pickle.dump(results_audit, open(f'results/audit_{dataset}{round(time.time())}.pkl','wb'))
-    pickle.dump(synth_audit, open(f'results/data_synth_audit_{dataset}{round(time.time())}.pkl','wb'))
+    #results_audit, synth_audit = experiment_audit(OC_params, OC_hyperparams)
+    #pickle.dump(results_audit, open(f'results/audit_{dataset}{round(time.time())}.pkl','wb'))
+    #pickle.dump(synth_audit, open(f'results/data_synth_audit_{dataset}{round(time.time())}.pkl','wb'))
     
     
     # lamba experiment
-    #results_lamb = experiment_lambda_adsgan(OC_params, OC_hyperparams, lambdas=None)
-    #pickle.dump(results_lamb, open(f'results/{dataset}{round(time.time())}.pkl','wb'))
+    results_lamb = experiment_lambda_adsgan(OC_params, OC_hyperparams, lambdas=None)
+    pickle.dump(results_lamb, open(f'results/{dataset}{round(time.time())}.pkl','wb'))
     
     
     #results = main_from_files(OC_params, OC_hyperparams)
