@@ -1,8 +1,3 @@
-#%% Import necessary packages
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 # for predictive tasks
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
@@ -52,7 +47,7 @@ from audit import audit
 
 #%% constants and settings
 methods = ['adsgan', 'wgan', 'vae', 'gan']
-dataset = 'covid'
+dataset = 'bc'
 
 original_data_dir = 'data/tabular/original'
 synth_data_dir = 'data/tabular/synth'
@@ -73,13 +68,11 @@ save_synth = False
 
 
 # Train OneClass representation model
-train_OC = False
+train_OC = True
 # If train is true, save new model (overwrites old OC model)
 save_OC = False
  
 which_metric = [['ID','OC','WD','FD', 'parzen', 'PRDC'],['OC']]
-    
-
 
 
 tf.random.set_seed(2021)
@@ -87,8 +80,8 @@ np.random.seed(2021)
 
 
 # OneClass representation model
-OC_params  = dict({"rep_dim": 32, 
-                "num_layers": 3, 
+OC_params  = dict({"rep_dim": None, 
+                "num_layers": 2, 
                 "num_hidden": 128, 
                 "activation": "ReLU",
                 "dropout_prob": 0.5, 
@@ -129,6 +122,7 @@ def load_covid_data():
     X = MinMaxScaler().fit_transform(df)
     df = pd.DataFrame(X,columns = df.columns)
     return df
+
 
 def load_mnist_data(path, embedding_no=3):
     embeddings = []
@@ -198,8 +192,6 @@ def feature_importance_comparison(X, Y, method_names=None):
                    stds, labels=method_names, tick_names = X[0].columns, save_name = 'all_feat_importance')
 
     return [importances, stds]
-
-
 
 
 def cv_predict_scores(X, y, classifier, n_splits=5):
@@ -335,12 +327,7 @@ def predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y, method_name=No
             'auc':{'original':aucs,'synthetic':synth_aucs, 'transfer': transf_aucs},
             'std_auc': {'original': std_aucs, 'synthetic': std_synth_aucs, 'transfer':std_transf_aucs}}
             
-                
 
-    
-    
-
-    
 
 #%% Misc
     
@@ -432,9 +419,6 @@ def roc(X, y, classifier, n_splits=6, pos_label = 2):
     plt.show()
     
     return mean_auc, mean_acc    
-
-
-
 
 
 #%%  
@@ -542,7 +526,7 @@ def experiment_audit(OC_params, OC_hyperparams):
     
     # parameters for generative models
     params = dict()
-    params["iterations"] = 2000
+    params["iterations"] = 200
     params["h_dim"] = 100
     params["z_dim"] = 10
     params["mb_size"] = 128
@@ -563,9 +547,6 @@ def experiment_audit(OC_params, OC_hyperparams):
     
 
     return results_after_auditing, synth_data
-
-
-
 
 
 def experiment_lambda_adsgan(OC_params, OC_hyperparams, lambdas=None):
@@ -619,7 +600,6 @@ def experiment_lambda_adsgan(OC_params, OC_hyperparams, lambdas=None):
     plot_all(lambdas, all_results, r'$\lambda$',name='ads-gan_lambda_test_'+dataset)
     
     return all_results
-
 
 
 def main(OC_params, OC_hyperparams):
