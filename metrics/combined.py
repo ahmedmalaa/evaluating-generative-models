@@ -36,7 +36,7 @@ def compute_metrics(X, Y, which_metric=None, wd_params=None, model=None):
         
     if wd_params is None:
         wd_params = dict()
-        wd_params['iterations'] = 2000
+        wd_params['iterations'] = 500
         wd_params['h_dim'] = 30
         wd_params['z_dim'] = 10
         wd_params['mb_size'] = 128
@@ -87,7 +87,7 @@ def compute_metrics(X, Y, which_metric=None, wd_params=None, model=None):
         
     
         # (4) Frechet distance
-        if 'FD' in which_metric[emb_index]:
+        if 'FD' in which_metric[emb_index] or 'FID' in which_metric[emb_index]:
             results[f'fid_value{emb}'] = compute_frechet_distance(X, Y)
             print('Frechet distance', results[f'fid_value{emb}'])
             print('Frechet distance/dim', results[f'fid_value{emb}']/Y.shape[-1])

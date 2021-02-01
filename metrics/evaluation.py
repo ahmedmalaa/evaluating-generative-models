@@ -1,5 +1,5 @@
 
-# Copyright (c) 2021, Ahmed M. Alaa
+# Copyright (c) 2021, Ahmed M. Alaa, Boris van Breugel
 # Licensed under the BSD 3-clause license (see LICENSE.txt)
 
 """
@@ -53,6 +53,7 @@ def compute_alpha_precision(real_data, synthetic_data, emb_center):
     nbrs_synth = NearestNeighbors(n_neighbors = 1, n_jobs=-1, p=2).fit(synthetic_data)
     real_to_synth, real_to_synth_args = nbrs_synth.kneighbors(real_data)
 
+    # Let us find closest real point to any real point, excluding itself (therefore 1 instead of 0)
     real_to_real          = torch.from_numpy(real_to_real[:,1].squeeze())
     real_to_synth         = torch.from_numpy(real_to_synth.squeeze())
     real_to_synth_args    = real_to_synth_args.squeeze()

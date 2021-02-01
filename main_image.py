@@ -24,7 +24,7 @@ import matplotlib.pyplot as plt
 
 from representations.OneClass import OneClassLayer
 from metrics.combined import compute_metrics
-
+import time
 
 from PIL import Image
 tf.config.run_functions_eagerly(True)
@@ -36,15 +36,15 @@ else:
 #%%
 
 
-OC_params  = dict({"rep_dim": 100, 
-                "num_layers": 2, 
-                "num_hidden": 200, 
+OC_params  = dict({"rep_dim": 32, 
+                "num_layers": 3, 
+                "num_hidden": 128, 
                 "activation": "ReLU",
                 "dropout_prob": 0.5, 
                 "dropout_active": False,
                 "LossFn": "SoftBoundary",
-                "lr": 1e-3,
-                "epochs": 500,
+                "lr": 2e-3,
+                "epochs": 2000,
                 "warm_up_epochs" : 10,
                 "train_prop" : 0.8,
                 "weight_decay": 1e-2}   
@@ -52,7 +52,7 @@ OC_params  = dict({"rep_dim": 100,
 
 OC_hyperparams = dict({"Radius": 1, "nu": 1e-2})
 
-which_metric = [['FID','ID','PRDC','WD'],['ID','OC']]
+which_metric = [['FID','ID','PRDC','WD','OC', 'parzen'],['OC']]
 #which_metric = None
 
 
@@ -104,6 +104,7 @@ def load_embedder(embedding):
 
 def plot_all(x, res, x_axis, metric_keys=None, name=None):
     """ Plots results of experiment with varying mode drop/authenticity"""
+    print(res)
     if type(res) == type([]):
         plot_legend = False
         res = {'0':res}
@@ -115,8 +116,10 @@ def plot_all(x, res, x_axis, metric_keys=None, name=None):
         metric_keys = res[exp_keys[0]][0].keys() 
     
     for m_key in metric_keys:
-        fig = fig = plt.figure(figsize=(12,6))
+        fig = plt.figure(figsize=(12,6))
+        
         for e_key in exp_keys:
+            
             y = [res[e_key][i][m_key] for i in range(len(x))]
             plt.plot(x, y, label=e_key)
         plt.ylabel(m_key)
@@ -125,8 +128,11 @@ def plot_all(x, res, x_axis, metric_keys=None, name=None):
         if plot_legend:
             plt.legend()
         if name is not None:
-            fig.savefig(f'visualisations/{name}_{m_key}.png', bbox_inches='tight', pad_inches=0)
-            
+            fig_name = f'visualisations/{name}_{m_key}.png'
+            print('Saving figure with name', fig_name)
+            fig.savefig(fig_name, bbox_inches='tight', pad_inches=0)
+        else:
+            print('No name is defined!')
         plt.close()
 
 
@@ -253,6 +259,8 @@ def activation_loader_per_class(path_set, embedding = None, verbose = False):
     activations = []
     # Load embedder function
     if embedding is not None:
+        tf.compat.v1.enable_eager_execution()
+        
         embedder = load_embedder(embedding)
 
     # Check if folder exists
@@ -261,18 +269,16 @@ def activation_loader_per_class(path_set, embedding = None, verbose = False):
         act = get_activation(path, embedding, embedder, True)
         activations.append(act)
         print(f'Label {label} has {act.shape[0]} observations')
-            
+    
+    
     return activations
 
 
-
-
-def experiments(paths, embedding, OC_params, OC_hyperparams):
+def experiments(paths, embedding, OC_params, OC_hyperparams, exp_no = 2):
     
     #activations = activation_loader_per_class(paths, embedding)
     # random assignment
     path = paths[0]
-    
     X = get_activation(path, embedding)
     print('Shape original data:', X.shape)
     Y_per_class = activation_loader_per_class(paths[1],embedding)
@@ -283,73 +289,174 @@ def experiments(paths, embedding, OC_params, OC_hyperparams):
     Y_other = np.concatenate([Y[:1000] for Y in Y_per_class[1:]],axis=0)
     print(f'Label other has {Y_other.shape[0]} elements')
     
-    step_size = 1
+    step_size = 0.05
     
     # Train OC model
     OC_filename = f'metrics/OC_model_{dataset}_{embedding["model"]}_{embedding["dim64"]}.pkl' 
             
     OC_filename = f'metrics/OC_model_{dataset}_{embedding["model"]}_{embedding["dim64"]}.pkl' 
     OC_model, OC_params, OC_hyperparams = get_OC_model(OC_filename, train_OC, X, OC_params, OC_hyperparams)
-            
     
-    #simultaneous dropping
-    p_mode_drops = np.arange(0,1+step_size,step_size)
+    res_md = {}    
+    res_aut = []       
     
-
-    res_sim = []
-    res_seq = []
-    print('======= Started experiment 1 =========')
-    for p_mode_drop in p_mode_drops:
-        mode_drop = np.random.rand(len(Y_other))<p_mode_drop
-        print(f'p_drop={p_mode_drop} with total {np.sum(mode_drop)}')
-        Y_A = Y_zero[:num_per_class+np.sum(mode_drop)]
-        print(len(Y_A))
-        Y_B = Y_other[mode_drop==False]
-        Y = np.concatenate((Y_A, Y_B), axis=0)
-        res = compute_metrics(X, Y, which_metric, model = OC_model)
-        res_sim.append(res)
-    
-    print('======== Started experiment 2 =========')
-    # sequential dropping    
-    # for p_mode_drop in p_mode_drops:
-    #     print(f'p_drop={p_mode_drop}')
-    #     n_mode_drop = np.sum(np.random.rand(len(Y_other))<p_mode_drop)
-    #     Y_A = Y_zero[:num_per_class+n_mode_drop]
-    #     if n_mode_drop != 0:
-    #         Y_B = Y_other[:-n_mode_drop]
-    #     else:
-    #         Y_B = Y_other
-    #     Y = np.concatenate((Y_A, Y_B), axis=0)
-    #     print('Y shapes', Y_A.shape, Y_B.shape, Y.shape)
-    #     res = compute_metrics(X, Y, which_metric, model = OC_model)
-    #     res_seq.append(res)
-    
-    
-    
-    # res_md = {}
-    # res['Simultaneous'] = res_sim
-    # res_md['Sequential'] = res_seq
-    # plot_all(p_mode_drops, res_md, r'p', name='mode_dropping')
-    
-    
-    # # Copied proportion
-    # print('========= Started experiment 3 ========')
-    
-    # step_size = 0.1
-    # p_copied = np.arange(0,1+step_size,step_size)
-    
-    # res_aut = []
-
-    # for p in p_copied:
-    #     print(f'p_copied={p}')
-    #     c = int(p*len(X))
-    #     Y_p = np.concatenate((X[:c],Y[c:]),axis=0)
-    #     res_ = compute_metrics(X, Y_p, which_metric, model=OC_model)
-    #     res_aut.append(res_)    
+    if exp_no!=1:
+        #simultaneous dropping
         
-    # plot_all(p_copied, res_aut, r'$p_{copied}$', name='authenticity_copying') 
+        p_mode_drops = np.arange(0,1+step_size,step_size)
+        
 
-    # return (res_md, res_aut)
+        res_sim = []
+        res_seq = []
+        print('======= Started experiment 1 =========')
+        for p_mode_drop in p_mode_drops:
+            mode_drop = np.random.rand(len(Y_other))<p_mode_drop
+            print(f'p_drop={p_mode_drop} with total {np.sum(mode_drop)}')
+            Y_A = Y_zero[:num_per_class+np.sum(mode_drop)]
+            print(len(Y_A))
+            Y_B = Y_other[mode_drop==False]
+            Y = np.concatenate((Y_A, Y_B), axis=0)
+            res = compute_metrics(X, Y, which_metric, model = OC_model)
+            res_sim.append(res)
+        
+        print('======== Started experiment 2 =========')
+        # sequential dropping    
+        for p_mode_drop in p_mode_drops:
+            print(f'p_drop={p_mode_drop}')
+            n_mode_drop = np.sum(np.random.rand(len(Y_other))<p_mode_drop)
+            Y_A = Y_zero[:num_per_class+n_mode_drop]
+            if n_mode_drop != 0:
+                Y_B = Y_other[:-n_mode_drop]
+            else:
+                Y_B = Y_other
+            Y = np.concatenate((Y_A, Y_B), axis=0)
+            print('Y shapes', Y_A.shape, Y_B.shape, Y.shape)
+            res = compute_metrics(X, Y, which_metric, model = OC_model)
+            res_seq.append(res)
+        
+        
+        
+        res_md['Simultaneous'] = res_sim
+        res_md['Sequential'] = res_seq
+        plot_all(p_mode_drops, res_md, r'p', name='mode_dropping')
+        
+    if exp_no != 0:
+        # # Copied proportion
+        print('========= Started experiment 3 ========')
+        
+        step_size = 0.05
+        p_copied = np.arange(0,1+step_size,step_size)
+        
+        
+
+        for p in p_copied:
+            print(f'p_copied={p}')
+            c = int(p*len(X))
+            Y_p = np.concatenate((X[:c],Y[c:]),axis=0)
+            res_ = compute_metrics(X, Y_p, which_metric, model=OC_model)
+            res_aut.append(res_)    
+            
+        plot_all(p_copied, res_aut, r'$p_{copied}$', name='authenticity_copying') 
+
+    return (res_md, res_aut)
+
+
+def experiments_resolution(paths, embedding, OC_params, OC_hyperparams):
+    
+    #activations = activation_loader_per_class(paths, embedding)
+    # random assignment
+    path = paths[0]
+    X = activation_loader_per_class(path, embedding)
+    for i in range(10):
+        means = np.mean(X[i], axis=0)
+        stds = np.std(X[i], std=0)
+    A = np.zeros((10,10))
+    for i in range(10):
+        for j in range(10):
+            A[i,j] = np.linalg.norm(means[i], means[j],2)
+    print(A)
+    return None
+
+    Y_per_class = activation_loader_per_class(paths[1],embedding)
+    num_per_class = 1000
+    Y_zero = Y_per_class[0][:10*num_per_class]
+    print(f'Label 0 has {Y_zero.shape[0]} elements')
+    
+    Y_other = np.concatenate([Y[:1000] for Y in Y_per_class[1:]],axis=0)
+    print(f'Label other has {Y_other.shape[0]} elements')
+    
+    step_size = 0.05
+    
+    # Train OC model
+    OC_filename = f'metrics/OC_model_{dataset}_{embedding["model"]}_{embedding["dim64"]}.pkl' 
+            
+    OC_filename = f'metrics/OC_model_{dataset}_{embedding["model"]}_{embedding["dim64"]}.pkl' 
+    OC_model, OC_params, OC_hyperparams = get_OC_model(OC_filename, train_OC, X, OC_params, OC_hyperparams)
+    
+    res_md = {}    
+    res_aut = []  
+    
+    if exp_no!=1:
+        #simultaneous dropping
+        
+        p_mode_drops = np.arange(0,1+step_size,step_size)
+        
+
+        res_sim = []
+        res_seq = []
+        print('======= Started experiment 1 =========')
+        for p_mode_drop in p_mode_drops:
+            mode_drop = np.random.rand(len(Y_other))<p_mode_drop
+            print(f'p_drop={p_mode_drop} with total {np.sum(mode_drop)}')
+            Y_A = Y_zero[:num_per_class+np.sum(mode_drop)]
+            print(len(Y_A))
+            Y_B = Y_other[mode_drop==False]
+            Y = np.concatenate((Y_A, Y_B), axis=0)
+            res = compute_metrics(X, Y, which_metric, model = OC_model)
+            res_sim.append(res)
+        
+        print('======== Started experiment 2 =========')
+        # sequential dropping    
+        for p_mode_drop in p_mode_drops:
+            print(f'p_drop={p_mode_drop}')
+            n_mode_drop = np.sum(np.random.rand(len(Y_other))<p_mode_drop)
+            Y_A = Y_zero[:num_per_class+n_mode_drop]
+            if n_mode_drop != 0:
+                Y_B = Y_other[:-n_mode_drop]
+            else:
+                Y_B = Y_other
+            Y = np.concatenate((Y_A, Y_B), axis=0)
+            print('Y shapes', Y_A.shape, Y_B.shape, Y.shape)
+            res = compute_metrics(X, Y, which_metric, model = OC_model)
+            res_seq.append(res)
+        
+        
+        
+        res_md['Simultaneous'] = res_sim
+        res_md['Sequential'] = res_seq
+        plot_all(p_mode_drops, res_md, r'p', name='mode_dropping')
+        
+    if exp_no != 0:
+        # # Copied proportion
+        print('========= Started experiment 3 ========')
+        
+        step_size = 0.05
+        p_copied = np.arange(0,1+step_size,step_size)
+        
+        
+
+        for p in p_copied:
+            print(f'p_copied={p}')
+            c = int(p*len(X))
+            Y_p = np.concatenate((X[:c],Y[c:]),axis=0)
+            res_ = compute_metrics(X, Y_p, which_metric, model=OC_model)
+            res_aut.append(res_)    
+            
+        plot_all(p_copied, res_aut, r'$p_{copied}$', name='authenticity_copying') 
+
+    return (res_md, res_aut)
+
+
 
 
 #%% main
@@ -424,7 +531,7 @@ if __name__ == '__main__':
     #for embed in ['inceptionv3','vgg','identity']:
     methods = ['WGAN-GP','DCGAN','VAE', 'ADS-GAN']
     load_act = True
-    save_act = True
+    save_act = False
     nul_path = ['data/mnist/original/testing']
     conditional_path = ['data/mnist/synth_test/CGAN']
     random_path = ['data/mnist/random']
@@ -432,7 +539,7 @@ if __name__ == '__main__':
     paths = nul_path + random_path + other_paths
     
     dataset = 'MNIST'
-    train_OC = False
+    train_OC = True
     save_OC= True
     
     #embeddings.append(None)
@@ -448,9 +555,14 @@ if __name__ == '__main__':
                 'randomise': True, 'dim64': True})
     
     outputs = []
-    results = experiments(nul_path+conditional_path, embeddings[0], OC_params, OC_hyperparams)
-    pickle.dump(results,open('results_mnist_experiments.pkl','wb'))
-    #for embedding in embeddings:
-    #    output = main(paths, embedding, OC_params, OC_hyperparams, load_act, save_act,verbose=True, just_load = True)
-            #outputs.append(output)
+    exp_no = 0
+    embedding_no = 0
+    embedding = embeddings[embedding_no]
+    #results = experiments(nul_path+conditional_path, embedding, OC_params, OC_hyperparams, exp_no)
+    #pickle.dump(results,open(f'results/mnist_experiments_{exp_no}_{round(time.time())}.pkl','wb'))
+    output = main(paths, embedding, OC_params, OC_hyperparams, load_act, save_act,verbose=True, just_load = False)
+    #results_res = experiments_resolution(nul_path+conditional_path, embedding, OC_params, OC_hyperparams)
+    pickle.dump(output,open(f'results/mnist_baselines{round(time.time())}.pkl','wb'))
+    
+    #pickle.dump(output,open(f'results/mnist_resolution{round(time.time())}.pkl','wb'))
     

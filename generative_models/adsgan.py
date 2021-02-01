@@ -44,8 +44,11 @@ def adsgan(orig_data, params):
     ## Parameters        
     # Feature no
     x_dim = len(orig_data.columns)        
-    # Sample no
-    no = len(orig_data)        
+
+    try:
+        no = params['sample_no']
+    except KeyError:
+        no = len(orig_data)        
     
     # Batch size        
     mb_size = params['mb_size']
@@ -57,12 +60,17 @@ def adsgan(orig_data, params):
     lambda_ = params['lambda']
     # Training iterations
     iterations = params['iterations']
-    # GAN type
-    gen_model_name = params['gen_model_name']
     # WGAN-GP parameters
     lam = 10
-    lr = 1e-4        
+    lr = 1e-4   
 
+    # Adam optimization
+    beta_1 = 0.5
+
+    try:
+        lambda_tester = params['lambda_tester']
+    except KeyError:
+        lambda_tester = False
     #%% Data Preprocessing
     orig_data = np.asarray(orig_data)
 
@@ -94,8 +102,15 @@ def adsgan(orig_data, params):
     def xavier_init(size):
         in_dim = size[0]
         xavier_stddev = 1. / tf.sqrt(in_dim / 2.)
-        return tf.random.normal(shape = size, stddev = xavier_stddev)        
-                
+        return tf.random.normal(shape = size, stddev = xavier_stddev)   
+
+    def xavier_init_I(size):
+        if lambda_tester:
+
+            return tf.eye(size[0],size[1]) + xavier_init(size)/10
+        else:
+            return xavier_init(size)
+
     # Sample from uniform distribution
     def sample_Z(m, n):
         return np.random.uniform(-1., 1., size = [m, n])
@@ -117,33 +132,39 @@ def adsgan(orig_data, params):
 
     D_W2 = tf.Variable(xavier_init([h_dim,h_dim]))
     D_b2 = tf.Variable(tf.zeros(shape=[h_dim]))
-        
+    
     D_W3 = tf.Variable(xavier_init([h_dim,1]))
     D_b3 = tf.Variable(tf.zeros(shape=[1]))
 
     theta_D = [D_W1, D_W2, D_W3, D_b1, D_b2, D_b3]
+    
+    if lambda_tester:
+        D_W4 = tf.Variable(xavier_init([h_dim,h_dim]))
+        D_b4 = tf.Variable(tf.zeros(shape=[h_dim]))
+        theta_D+= [D_W4, D_b4]
+    
         
     #%% Generator
-    G_W1 = tf.Variable(xavier_init([z_dim + x_dim, h_dim]))
+
+    G_W1 = tf.Variable(xavier_init_I([z_dim + x_dim, h_dim]))
     G_b1 = tf.Variable(tf.zeros(shape=[h_dim]))
 
-    G_W2 = tf.Variable(xavier_init([h_dim,h_dim]))
+    G_W2 = tf.Variable(xavier_init_I([h_dim,h_dim]))
     G_b2 = tf.Variable(tf.zeros(shape=[h_dim]))
     
-    G_W3 = tf.Variable(xavier_init([h_dim,h_dim]))
+    G_W3 = tf.Variable(xavier_init_I([h_dim,h_dim]))
     G_b3 = tf.Variable(tf.zeros(shape=[h_dim]))
 
-    G_W4 = tf.Variable(xavier_init([h_dim, x_dim]))
+    G_W4 = tf.Variable(xavier_init_I([h_dim, x_dim]))
     G_b4 = tf.Variable(tf.zeros(shape=[x_dim]))
-        
     theta_G = [G_W1, G_W2, G_W3, G_W4, G_b1, G_b2, G_b3, G_b4]
-
+        
     #%% Generator and discriminator functions
     def generator(z, x):
-        inputs = tf.concat([z, x], axis = 1)
-        G_h1 = tf.nn.tanh(tf.matmul(inputs, G_W1) + G_b1)
-        G_h2 = tf.nn.tanh(tf.matmul(G_h1, G_W2) + G_b2)
-        G_h3 = tf.nn.tanh(tf.matmul(G_h2, G_W3) + G_b3)
+        inputs = tf.concat([x, z], axis = 1)
+        G_h1 = tf.nn.relu(tf.matmul(inputs, G_W1) + G_b1)
+        G_h2 = tf.nn.relu(tf.matmul(G_h1, G_W2) + G_b2)
+        G_h3 = tf.nn.relu(tf.matmul(G_h2, G_W3) + G_b3)
         G_log_prob = tf.nn.sigmoid(tf.matmul(G_h3, G_W4) + G_b4)
                 
         return G_log_prob
@@ -151,8 +172,12 @@ def adsgan(orig_data, params):
     def discriminator(x):
         D_h1 = tf.nn.relu(tf.matmul(x, D_W1) + D_b1)
         D_h2 = tf.nn.relu(tf.matmul(D_h1, D_W2) + D_b2)
-        out = (tf.matmul(D_h2, D_W3) + D_b3)
-                
+        if lambda_tester:
+            D_h4 = tf.nn.relu(tf.matmul(D_h2, D_W4) + D_b4)
+        else:
+            D_h4 = D_h2
+        
+        out = tf.matmul(D_h4, D_W3) + D_b3     
         return out
         
     #%% Structure
@@ -160,25 +185,23 @@ def adsgan(orig_data, params):
     D_real = discriminator(X)
     D_fake = discriminator(G_sample) 
     
-    if gen_model_name == 'adsgan' or gen_model_name=='wgan':
-            
-        # Replacement of Clipping algorithm to Penalty term
-        # 1. Line 6 in Algorithm 1
-        eps = tf.random.uniform([mb_size, 1], minval = 0., maxval = 1.)
-        X_inter = eps*X + (1. - eps) * G_sample
-    
-        # 2. Line 7 in Algorithm 1
-        grad = tf.gradients(ys=discriminator(X_inter), xs=[X_inter])[0]
-        grad_norm = tf.sqrt(tf.reduce_sum(input_tensor=(grad)**2 + 1e-8, axis = 1))
-        grad_pen = lam * tf.reduce_mean(input_tensor=(grad_norm - 1)**2)
-    
-        # Loss function
-        D_loss = tf.reduce_mean(input_tensor=D_fake) - tf.reduce_mean(input_tensor=D_real) + grad_pen
-    
-    
-    
-    elif gen_model_name == 'gan':
-        D_loss = tf.reduce_mean(input_tensor=D_fake) - tf.reduce_mean(input_tensor=D_real)
+
+        
+    # Replacement of Clipping algorithm to Penalty term
+    # 1. Line 6 in Algorithm 1
+    eps = tf.random.uniform([mb_size, 1], minval = 0., maxval = 1.)
+    X_inter = eps*X + (1. - eps) * G_sample
+
+    # 2. Line 7 in Algorithm 1
+    grad = tf.gradients(ys=discriminator(X_inter), xs=[X_inter])[0]
+    grad_norm = tf.sqrt(tf.reduce_sum(input_tensor=(grad)**2 + 1e-8, axis = 1))
+    grad_pen = lam * tf.reduce_mean(input_tensor=(grad_norm - 1)**2)
+
+    # Loss function
+    D_loss = tf.reduce_mean(input_tensor=D_fake) - tf.reduce_mean(input_tensor=D_real) + grad_pen
+
+
+
     
     G_loss1 = -tf.sqrt(tf.reduce_mean(input_tensor=tf.square(X - G_sample)))
     G_loss2 = -tf.reduce_mean(input_tensor=D_fake)
@@ -186,8 +209,8 @@ def adsgan(orig_data, params):
     G_loss = G_loss2 + lambda_ * G_loss1
     
     # Solver
-    D_solver = (tf.compat.v1.train.AdamOptimizer(learning_rate = lr, beta1 = 0.5).minimize(D_loss, var_list = theta_D))
-    G_solver = (tf.compat.v1.train.AdamOptimizer(learning_rate = lr, beta1 = 0.5).minimize(G_loss, var_list = theta_G))
+    D_solver = (tf.compat.v1.train.AdamOptimizer(learning_rate = lr, beta1 = beta_1).minimize(D_loss, var_list = theta_D))
+    G_solver = (tf.compat.v1.train.AdamOptimizer(learning_rate = lr, beta1 = beta_1).minimize(G_loss, var_list = theta_G))
                         
     #%% Iterations
     sess = tf.compat.v1.Session()
@@ -199,19 +222,21 @@ def adsgan(orig_data, params):
         for _ in range(5):        
             Z_mb = sample_Z(mb_size, z_dim)                        
 
-            X_idx = sample_X(no,mb_size)                
+            X_idx = sample_X(no, mb_size)                
             X_mb = orig_data[X_idx,:]    
                         
             _, D_loss_curr = sess.run([D_solver, D_loss], feed_dict = {X: X_mb, Z: Z_mb})
-                        
+                    
         # Generator Training
         Z_mb = sample_Z(mb_size, z_dim)     
                 
-        X_idx = sample_X(no,mb_size)                
+        X_idx = sample_X(no, mb_size)                
         X_mb = orig_data[X_idx,:]    
                                         
         _, G_loss1_curr, G_loss2_curr = sess.run([G_solver, G_loss1, G_loss2], feed_dict = {X: X_mb, Z: Z_mb})
-        
+        #if it%10==0:
+        #    print(G_loss1_curr, G_loss2_curr)
+
     #%% Output Generation
     synth_data = sess.run([G_sample], feed_dict = {Z: sample_Z(no, z_dim), X: orig_data})
     synth_data = synth_data[0]
@@ -222,6 +247,6 @@ def adsgan(orig_data, params):
     # Binary features
     for i in range(x_dim):
         if len(np.unique(orig_data[:, i])) == 2:
-            synth_data[:, i] = np.round(synth_data[:, i])
+            synth_data[:, i] = np.array(np.round(synth_data[:, i]),dtype='int')
      
     return synth_data
