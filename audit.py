@@ -38,25 +38,11 @@ def audit(real_data, params, OC_model):
     alpha_precision_curve = []
     beta_coverage_curve   = []
     nbrs_real = NearestNeighbors(n_neighbors = 2, n_jobs=-1, p=2).fit(X)
-    real_to_real, real_to_real_args       = nbrs_real.kneighbors(X)
+    real_to_real, _       = nbrs_real.kneighbors(X)
     real_to_real          = torch.from_numpy(real_to_real[:,1].squeeze())
-    
-    print('Difference a;lf', (real_to_real_args[:,0]==np.arange(n_orig)).mean())
-    real_to_real_args          = real_to_real_args[:,1].squeeze()
-
 
     number_per_quantile = np.round(np.quantile(np.arange(n_orig),alphas))
     number_per_quantile = number_per_quantile[1:] - number_per_quantile[:-1] 
-    
-    r2r = scipy.spatial.distance_matrix(X,X)
-    r2r[np.eye(n_orig, dtype='bool')] = np.max(r2r)+1 #just set it large so it's not chosen
-    min_r2r = np.min(r2r,axis=1)
-    min_r2r_args = np.argmin(r2r,axis=1)    
-    print('min_r2r', (min_r2r==0).mean())
-    
-    print('Difference abs', np.max(np.abs(min_r2r-real_to_real.numpy())))
-    print('Difference arguments')
-    
     
     synthetic_data = []
     
@@ -70,35 +56,31 @@ def audit(real_data, params, OC_model):
         with torch.no_grad():
             Y = OC_model(torch.tensor(synth_data, device=OC_model.device).float().to(device)).cpu().detach().numpy()
         
+        synth_to_real, synth_to_real_args = nbrs_real.kneighbors(Y)
         
-    
-        nbrs_synth = NearestNeighbors(n_neighbors = 1, n_jobs=-1, p=2).fit(Y)
-        real_to_synth, real_to_synth_args = nbrs_synth.kneighbors(X)
-        real_to_synth         = torch.from_numpy(real_to_synth.squeeze())
-        real_to_synth_args    = real_to_synth_args.squeeze()
-        print('Mean real to synth' , torch.mean(real_to_synth))
-        print('mean real to real', torch.mean(real_to_real[real_to_synth_args]))
+        synth_to_real         = torch.from_numpy(synth_to_real[:,0].squeeze())
+        synth_to_real_args    = synth_to_real_args[:,0].squeeze()
+            
         # Audit
         #authen = np.ones(len(real_to_synth),dtype='bool')#
-        authen = real_to_real[real_to_synth_args] < real_to_synth
+        authen = real_to_real[synth_to_real_args] < synth_to_real
+        print('Autenticity:', np.mean(np.array(authen)))
         indices_to_use_authen = np.arange(len(authen), dtype = 'int')[authen]
         synth_data = synth_data[indices_to_use_authen]
-        print('After auditing out unauthentic points, points remain:',synth_data.shape[0])
+        #print('After auditing out unauthentic points, points remain:',synth_data.shape[0])
 
         Y = Y[indices_to_use_authen]
-
-        nbrs_synth            = NearestNeighbors(n_neighbors = 1, n_jobs=-1, p=2).fit(Y)
-        
-        real_to_synth, real_to_synth_args = nbrs_synth.kneighbors(X)
-        
-        real_to_synth         = torch.from_numpy(real_to_synth.squeeze())
-        real_to_synth_args    = real_to_synth_args.squeeze()
-        
-        print('After which the authenticity is', np.mean(np.array(real_to_real[real_to_synth_args] < real_to_synth,dtype='bool')))
-        
+        synth_to_real, synth_to_real_args = nbrs_real.kneighbors(Y)
+        synth_to_real         = torch.from_numpy(synth_to_real[:,0].squeeze())
+        synth_to_real_args    = synth_to_real_args[:,0].squeeze()
 
 
         # Precisions
+        nbrs_synth            = NearestNeighbors(n_neighbors = 1, n_jobs=-1, p=2).fit(Y)
+        real_to_synth, real_to_synth_args = nbrs_synth.kneighbors(X)
+        real_to_synth         = torch.from_numpy(real_to_synth.squeeze())
+        real_to_synth_args    = real_to_synth_args.squeeze()
+
         synth_center          = torch.tensor(np.mean(Y, axis=0)).float()
         synth_to_center       = torch.sqrt(torch.sum((torch.tensor(Y).float() - emb_center) ** 2, dim=1))
 

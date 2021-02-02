@@ -27,10 +27,10 @@ from metrics.combined import compute_metrics
 import time
 
 from PIL import Image
-tf.config.run_functions_eagerly(True)
+#tf.config.run_functions_eagerly(True)
 
 if torch.cuda.is_available():
-    device = 'cuda'
+    device = 'cpu'
 else:
     device = 'cpu'
 #%%
@@ -52,7 +52,7 @@ OC_params  = dict({"rep_dim": 32,
 
 OC_hyperparams = dict({"Radius": 1, "nu": 1e-2})
 
-which_metric = [['FID','ID','PRDC','WD','OC', 'parzen'],['OC']]
+which_metric = [[],['OCalt']]
 #which_metric = None
 
 
@@ -99,7 +99,7 @@ def load_embedder(embedding):
             new_input = model.input
             hidden_layer = tf.keras.layers.Dense(64)(model.layers[-2].output)
             model = Model(new_input, hidden_layer)   
-    model.run_eagerly = True
+    model.run_eagerly = False
     return model
 
 def plot_all(x, res, x_axis, metric_keys=None, name=None):
@@ -259,9 +259,9 @@ def activation_loader_per_class(path_set, embedding = None, verbose = False):
     activations = []
     # Load embedder function
     if embedding is not None:
-        tf.compat.v1.enable_eager_execution()
+        #tf.compat.v1.enable_eager_execution()
         
-        embedder = load_embedder(embedding)
+        embedder = None#load_embedder(embedding)
 
     # Check if folder exists
     for label in range(10):
@@ -347,6 +347,8 @@ def experiments(paths, embedding, OC_params, OC_hyperparams, exp_no = 2):
         step_size = 0.05
         p_copied = np.arange(0,1+step_size,step_size)
         
+        Y = np.concatenate([Y[:1000] for Y in Y_per_class], axis=0)
+
         
 
         for p in p_copied:
@@ -443,7 +445,7 @@ def experiments_resolution(paths, embedding, OC_params, OC_hyperparams):
         step_size = 0.05
         p_copied = np.arange(0,1+step_size,step_size)
         
-        
+        Y = np.concatenate([Y[:1000] for Y in Y_per_class], axis=0)
 
         for p in p_copied:
             print(f'p_copied={p}')
@@ -555,14 +557,14 @@ if __name__ == '__main__':
                 'randomise': True, 'dim64': True})
     
     outputs = []
-    exp_no = 0
+    exp_no = 1
     embedding_no = 0
     embedding = embeddings[embedding_no]
-    #results = experiments(nul_path+conditional_path, embedding, OC_params, OC_hyperparams, exp_no)
-    #pickle.dump(results,open(f'results/mnist_experiments_{exp_no}_{round(time.time())}.pkl','wb'))
-    output = main(paths, embedding, OC_params, OC_hyperparams, load_act, save_act,verbose=True, just_load = False)
+    results = experiments(nul_path+conditional_path, embedding, OC_params, OC_hyperparams, exp_no)
+    pickle.dump(results,open(f'results/mnist_experiments_{exp_no}_{round(time.time())}.pkl','wb'))
+    #output = main(paths, embedding, OC_params, OC_hyperparams, load_act, save_act,verbose=True, just_load = False)
     #results_res = experiments_resolution(nul_path+conditional_path, embedding, OC_params, OC_hyperparams)
-    pickle.dump(output,open(f'results/mnist_baselines{round(time.time())}.pkl','wb'))
+    #pickle.dump(output,open(f'results/mnist_baselines{round(time.time())}.pkl','wb'))
     
     #pickle.dump(output,open(f'results/mnist_resolution{round(time.time())}.pkl','wb'))
     

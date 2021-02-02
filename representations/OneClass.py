@@ -114,7 +114,7 @@ class OneClassLayer(BaseNet):
         self.warm_up_epochs = params['warm_up_epochs']
         self.weight_decay   = params['weight_decay']
         if torch.cuda.is_available():
-            self.device     = torch.device('cuda') # Make this an option
+            self.device     = torch.device('c') 
         else:
             self.device     = torch.device('cpu')
         # set up the network
@@ -203,7 +203,7 @@ class OneClassLayer(BaseNet):
                         
                     elif self.loss_type=="OneClass":
                         
-                        loss_val = self.loss_fn(outputs=outputs, c=self.c).detach.cpu().numpy()
+                        loss_val = self.loss_fn(outputs=outputs, c=self.c).cpu().detach().numpy()
                     
                     self.loss_vals.append(loss_val)
                                         

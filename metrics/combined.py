@@ -21,7 +21,7 @@ import torch
 import numpy as np
 
 if torch.cuda.is_available():
-    device = 'cuda'
+    device = 'cpu'
 else:
     device = 'cpu'
 
@@ -36,7 +36,7 @@ def compute_metrics(X, Y, which_metric=None, wd_params=None, model=None):
         
     if wd_params is None:
         wd_params = dict()
-        wd_params['iterations'] = 500
+        wd_params['iterations'] = 2000
         wd_params['h_dim'] = 30
         wd_params['z_dim'] = 10
         wd_params['mb_size'] = 128
@@ -110,24 +110,28 @@ def compute_metrics(X, Y, which_metric=None, wd_params=None, model=None):
                 results[key+emb] = prdc_res[key]
         
         # (7) OneClass
-        if 'OC' in which_metric[emb_index]:
+        if 'OC' in which_metric[emb_index] or 'OCalt' in which_metric[emb_index]:
             if emb_index==1:
                 emb_center = model.c
             else:
                 emb_center = np.mean(X,axis=0)
             print('Start computing OC metrics')
-            OC_res = compute_alpha_precision(X, Y, emb_center)
+            if 'OCalt' in which_metric[emb_index]:
+                if 'OC' in which_metric[emb_index]:
+                    print('Cannot calculate both alternative and non-alternative coverage in one run!')
+                OC_res = compute_alpha_precision(X, Y, emb_center, alternative_coverage=True)
+            else:
+                OC_res = compute_alpha_precision(X, Y, emb_center, alternative_coverage=False)    
             alphas, alpha_precision_curve, beta_coverage_curve, Delta_precision_alpha, Delta_coverage_beta, authen = OC_res
             results[f'alphas{emb}'] = alphas
             results[f'alpha_pc{emb}'] = alpha_precision_curve
             results[f'beta_cv{emb}'] = beta_coverage_curve
-            results[f'auten{emb}'] = authen
+            results[f'authen{emb}'] = authen
             results[f'Dpa{emb}'] = Delta_precision_alpha
             results[f'Dcb{emb}'] = Delta_coverage_beta
-            results[f'Daut{emb}'] = np.mean(authen)
             print('OneClass: Delta_precision_alpha', results[f'Dpa{emb}'])
             print('OneClass: Delta_coverage_beta  ', results[f'Dcb{emb}'])
-            print('OneClass: Delta_autenticity    ', results[f'Daut{emb}'])
+            print('OneClass: authenticity    ', results[f'authen{emb}'])
         
 
     return results
