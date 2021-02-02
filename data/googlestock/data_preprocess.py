@@ -61,10 +61,8 @@ def split_stock_data(data, frac_train, frac_val, split_order=None):
         else:
             frac_dict[v] = frac_test
 
-    #print(frac_dict)
     frac_1_2_of_all = frac_dict[1] + frac_dict[2]
     frac_1_of_1_2 = frac_dict[1] / frac_1_2_of_all
-    #print("frac_1_of_1_2", frac_1_of_1_2)
 
     if split_order is None:
         split_order = DEFAULT_SPLIT_ORDER

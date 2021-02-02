@@ -3,4 +3,4 @@
 Author: Evgeny Saveliev (e.s.saveliev@gmail.com)
 """
 
-###from .data_preprocess import load_stock_data, split_stock_data
+from .data_preprocess import load_snp_data, split_snp_data
