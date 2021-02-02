@@ -41,6 +41,7 @@ from generative_models.adsgan import adsgan
 from generative_models.gan import gan
 from generative_models.pategan import pategan
 from generative_models.vae import vae
+from generative_models.dpgan import dpgan
 
 from metrics.combined import compute_metrics
 import metrics.prd_score as prd  # pylint: disable=unused-import
@@ -55,9 +56,13 @@ else:
 
 #%% Constants and settings
 
-run_experiment = "main"  # Options: ("main", "main_from_files", "lambda", "audit",)
+# Options: ("main", "main_from_files", "lambda", "audit",)
+run_experiment = "main"
 
-methods = ['adsgan', 'wgan', 'vae', 'gan']
+# Options: ("orig", "random", "adsgan", "wgan", "vae", "gan", "dpgan")
+methods =['adsgan', 'wgan', 'vae', 'gan', 'dpgan']
+
+# Options: ("covid", "bc")
 dataset = 'covid'
 
 original_data_dir = 'data/tabular/original'
@@ -685,6 +690,16 @@ def main(OC_params, OC_hyperparams):
                 synth_data = pategan(orig_data.to_numpy(), params_pate)  
             elif method=='vae':
                 synth_data = vae(orig_data, params)
+            elif method == "dpgan":
+                customized_dpgan_params = {
+                    "inputDim": orig_data.shape[1],
+                    "sigma": 10.0,  # NOTE: DP noise level.
+                    "nEpochs": 1000,
+                    "batchSize": 1024,
+                    "pretrainEpochs": 200, 
+                    "pretrainBatchSize": 128,
+                }
+                synth_data = dpgan(orig_data.to_numpy(), customized_dpgan_params)
                 
             if save_synth:
                 pickle.dump((synth_data, params),open(filename,'wb'))
