@@ -123,6 +123,8 @@ data/amsterdam/*
 !data/amsterdam/*.py
 data/googlestock/*
 !data/googlestock/*.py
+data/snp500/*
+!data/snp500/*.py
 data/ts_embedding/*
 !data/ts_embedding/*.py
 data/ts_generated/*

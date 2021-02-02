@@ -8,6 +8,9 @@
     * **Google Stock**:
         * Description: the dataset from Kaggle, [google stock price](https://www.kaggle.com/medharawat/google-stock-price).
         * Source files: `Google_Stock_Price_Train.csv`, `Google_Stock_Price_Test.csv`.
+    * **S&P 500**:
+        * Description: the dataset from Kaggle, [S&P 500 stock data](https://www.kaggle.com/camnugent/sandp500).
+        * Source files: `all_stocks_5yr.csv`.
 * Tabular:
     * Description TBC.
 * Images:
