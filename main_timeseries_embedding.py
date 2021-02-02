@@ -11,6 +11,7 @@ import torch.optim as optim
 
 from data import amsterdam
 from data import googlestock
+from data import snp500
 from representations.ts_embedding import Encoder, Decoder, Seq2Seq, train_seq2seq_autoencoder, iterate_eval_set
 from representations.ts_embedding import utils as s2s_utils
 
@@ -21,13 +22,14 @@ from representations.ts_embedding import utils as s2s_utils
 # Options for `run_experiment`: 
 #   - Learn embeddings:
 #     "learn:dummy" 
+#     "learn:googlestock"
+#     "learn:snp500" 
 #     "learn:amsterdam:combined_downsampled_subset" 
 #     "learn:amsterdam:test_subset"
 #     "learn:amsterdam:hns_subset"
-#     "learn:googlestock"
 #   - Apply existing embeddings:
 #     "apply:amsterdam:hns_competition_data"
-run_experiment = "learn:googlestock"
+run_experiment = "learn:snp500"#"learn:googlestock"
 
 models_dir = "./models/"
 embeddings_dir = "./data/ts_embedding/"
@@ -79,6 +81,32 @@ experiment_settings["learn:googlestock"] = {
     "model_name": "s2s_ae_googlestock.pt",
     "embeddings_name": "googlestock_embeddings.npy"
 }
+
+# S&P 500 Learn Autoencoder Experiment:
+experiment_settings["learn:snp500"] = {
+    "train_frac": 0.4,
+    "val_frac": 0.2,
+    "n_features": 5,
+    # --------------------
+    "include_time": False,
+    "max_timesteps": 1259,
+    "pad_val": -999.,
+    "eos_val": -777.,
+    "data_split_seed": 12345,
+    "data_loading_force_refresh": True,
+    # --------------------
+    "n_epochs": 100,
+    "batch_size": 256, 
+    "hidden_size": 20,
+    "num_rnn_layers": 2,
+    "lr": 0.01,
+    # --------------------
+    "data_path": "./data/snp500/all_stocks_5yr.csv",
+    "npz_cache_filepath": "./data/snp500/snp500.npz",
+    "model_name": "s2s_ae_snp500.pt",
+    "embeddings_name": "snp500_embeddings.npy"
+}
+
 
 # Amsterdam Data Learn Autoencoder Experiments:
 # - "learn:amsterdam:combined_downsampled_subset"
@@ -460,6 +488,31 @@ def main():
                 "test": (d_test, d_test_len),
                 "full": (d_full, d_full_len)
             }
+            data_dict = prep_datasets_for_s2s_ae_training(
+                x_xlen_dict=x_xlen_dict, 
+                device=selected_device, 
+                pad_val=exp_settings["pad_val"], 
+                eos_val=exp_settings["eos_val"]
+            )
+            dataloaders_dict = make_all_dataloaders(data_dict=data_dict, batch_size=exp_settings["batch_size"])
+
+        elif run_experiment == "learn:snp500":
+            processed_data, seq_lens, _ = snp500.load_snp_data(
+                data_path=exp_settings["data_path"], 
+                npz_cache_filepath=exp_settings["npz_cache_filepath"], 
+                padding_value=exp_settings["pad_val"], 
+                normalize=True, 
+                include_time=exp_settings["include_time"], 
+                force_refresh=exp_settings["data_loading_force_refresh"], 
+            )
+            train_x_xlen, val_x_xlen, test_x_xlen = snp500.split_snp_data(
+                data=processed_data, 
+                seq_lens=seq_lens, 
+                frac_train=exp_settings["train_frac"], 
+                frac_val=exp_settings["val_frac"], 
+                seed=exp_settings["data_split_seed"]
+            )
+            x_xlen_dict = {"train": train_x_xlen, "val": val_x_xlen, "test": test_x_xlen}
             data_dict = prep_datasets_for_s2s_ae_training(
                 x_xlen_dict=x_xlen_dict, 
                 device=selected_device, 
