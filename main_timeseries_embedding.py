@@ -88,7 +88,7 @@ experiment_settings["learn:amsterdam:combined_downsampled_subset"] = {
     "n_features": 70,
     # --------------------
     "include_time": False,
-    "max_timesteps": 100,
+    "max_timesteps": 2000,
     "pad_val": -999.,
     "eos_val": +777., 
     "data_split_seed": 12345,
