@@ -118,6 +118,7 @@ models/
 data/*
 !data/**/
 !data/__init__.py
+!data/**/*.md
 data/amsterdam/*
 !data/amsterdam/*.py
 data/googlestock/*
