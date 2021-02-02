@@ -46,7 +46,7 @@ from main_image import get_activation
 from audit import audit
 
 #%% constants and settings
-methods = ['adsgan', 'wgan', 'vae', 'gan']
+methods = ['adsgan', 'audit']
 dataset = 'covid'
 
 original_data_dir = 'data/tabular/original'
@@ -62,15 +62,15 @@ just_metrics = False
 
 #Save synthetic data iff we're training
 # Train generative models
-do_train = True
-save_synth = False
+do_train = False
+save_synth = True
 # just relevant for ADS-GAN
 
 
 # Train OneClass representation model
-train_OC = True
+train_OC = False
 # If train is true, save new model (overwrites old OC model)
-save_OC = False
+save_OC = True
  
 which_metric = [['ID','OC','WD','FD', 'parzen', 'PRDC'],['OC']]
 
@@ -90,7 +90,7 @@ OC_params  = dict({"rep_dim": None,
                 "lr": 2e-3,
                 "epochs": 1000,
                 "warm_up_epochs" : 20,
-                "train_prop" : 1.0,
+                "train_prop" : 0.8,
                 "weight_decay": 2e-3})   
 
 
@@ -120,7 +120,6 @@ def load_covid_data():
     df = df.drop(columns=['Sex','Race','SG_UF_NOT','Age_40','Age_40_50',
                       'Age_50_60','Age_60_70','Age_70','Branca'])
     X = MinMaxScaler().fit_transform(df)
-    
     df = pd.DataFrame(X,columns = df.columns)
     return df
 
@@ -438,25 +437,10 @@ def main_from_files(OC_params, OC_hyperparams):
     
     print('Shape original data:', orig_data.shape)
 
+    OC_params['input_dim'] = orig_data.shape[1]
     OC_filename = f'metrics/OC_model_{dataset}.pkl'    
-    if train_OC or not os.path.exists(OC_filename):
-        print('### Training OC embedding model')
-        
-        if OC_params['rep_dim'] is None:
-            OC_params['rep_dim'] = orig_data.shape[1]
-        # Check center definition !
-        OC_hyperparams['center'] = torch.ones(OC_params['rep_dim'])*10
-        OC_params['input_dim'] = orig_data.shape[1]
-        OC_model = OneClassLayer(params=OC_params, 
-                                 hyperparams=OC_hyperparams)
-        OC_model.fit(orig_data, verbosity=True)
-        if save_OC:
-            pickle.dump((OC_model, OC_params, OC_hyperparams),open(OC_filename,'wb'))
-    else:
-        OC_model,OC_params, OC_hyperparams = pickle.load(open(OC_filename,'rb'))
-        print('### Loaded OC embedding model')
-        print('Parameters:', OC_params)
-        print('Hyperparameters:', OC_hyperparams)
+    OC_model, OC_params, OC_hyperparams = get_OC_model(OC_filename, train_OC, orig_data, OC_params, OC_hyperparams)
+    
         
     # parameters for generative models
     params = dict()
@@ -522,6 +506,10 @@ def experiment_audit(OC_params, OC_hyperparams):
     print(orig_data.shape)
     n_orig = orig_data.shape[0]
     
+    
+    
+
+
     OC_filename = f'metrics/OC_model_{dataset}.pkl'    
     OC_model,OC_params, OC_hyperparams = get_OC_model(OC_filename, train_OC, orig_data.to_numpy(), OC_params, OC_hyperparams)
     
@@ -537,23 +525,30 @@ def experiment_audit(OC_params, OC_hyperparams):
     params['lambda'] = 1
     
     
-    synth_data = audit(orig_data, params, OC_model)
-    print('Shape after auditing:',synth_data.shape)
+    # no_auditing 
+    
+    # synth_data_0 = adsgan(orig_data, params)
 
-    results_after_auditing = compute_metrics(orig_data.to_numpy(), synth_data, 
+    # results_pred = predictive_model_comparison(orig_X, orig_Y, synth_X, synth_Y, method_name = 'before_auditing')
+    synth_data_a = audit(orig_data, params, OC_model)
+    print('Shape after auditing:',synth_data.shape)
+    results_after_auditing = compute_metrics(orig_data.to_numpy(), synth_data_a, 
                                         which_metric = which_metric, 
                                         wd_params = params, model=OC_model)
     
     
+
+    
+    
     
 
-    return results_after_auditing, synth_data
+    return None
 
 
 def experiment_lambda_adsgan(OC_params, OC_hyperparams, lambdas=None):
     plt.close('all')
     if lambdas is None:
-        lambdas = np.exp(np.arange(-3,3,0.2))
+        lambdas = np.exp(np.arange(-3,3,0.1))
         lambdas[0] = 0
     # Load data
     if dataset == 'bc':
@@ -621,7 +616,7 @@ def main(OC_params, OC_hyperparams):
     
     OC_params['input_dim'] = orig_data.shape[1]
     OC_filename = f'metrics/OC_model_{dataset}.pkl'    
-    OC_model,OC_params, OC_hyperparams = get_OC_model(OC_filename, train_OC, orig_data.to_numpy(), OC_params, OC_hyperparams)
+    OC_model, OC_params, OC_hyperparams = get_OC_model(OC_filename, train_OC, orig_data.to_numpy(), OC_params, OC_hyperparams)
         
     # parameters for generative models
     params = dict()
@@ -667,7 +662,10 @@ def main(OC_params, OC_hyperparams):
                 synth_data = pategan(orig_data.to_numpy(), params_pate)  
             elif method=='vae':
                 synth_data = vae(orig_data, params)
-                
+
+            elif method=='audit':
+                synth_data = audit(orig_data, params, OC_model)    
+            
             if save_synth:
                 pickle.dump((synth_data, params),open(filename,'wb'))
         
@@ -736,20 +734,20 @@ def main(OC_params, OC_hyperparams):
 
 if __name__ == '__main__':
     # Normal tabular data
-    #results, synth_data = main(OC_params, OC_hyperparams)
+    results, synth_data = main(OC_params, OC_hyperparams)
     #pickle.dump(synth_data, open(f'results/synth_data{dataset}{round(time.time())}.pkl','wb'))
+    #pickle.dump(results, open(f'results/main_results_{dataset}{round(time.time())}.pkl','wb'))
     
-    #pickle.dump(results, open(f'results/{dataset}{round(time.time())}.pkl','wb'))
-    
-    #results_audit, synth_audit = experiment_audit(OC_params, OC_hyperparams)
+    results_audit, synth_audit = experiment_audit(OC_params, OC_hyperparams)
     #pickle.dump(results_audit, open(f'results/audit_{dataset}{round(time.time())}.pkl','wb'))
     #pickle.dump(synth_audit, open(f'results/data_synth_audit_{dataset}{round(time.time())}.pkl','wb'))
     
     
     # lamba experiment
-    results_lamb = experiment_lambda_adsgan(OC_params, OC_hyperparams, lambdas=None)
-    pickle.dump(results_lamb, open(f'results/{dataset}{round(time.time())}.pkl','wb'))
+    #results_lamb = experiment_lambda_adsgan(OC_params, OC_hyperparams, lambdas=None)
+    #pickle.dump(results_lamb, open(f'results/lambda_exp{dataset}{round(time.time())}.pkl','wb'))
     
     
     #results = main_from_files(OC_params, OC_hyperparams)
+    #pickle.dump(results, open(f'results/results_{dataset}{round(time.time())}.pkl','wb'))
     
