@@ -68,7 +68,7 @@ experiment_settings["learn:googlestock"] = {
     "eos_val": -777.,  
     # NOTE: No "data_split_seed", as data is split along the time axis, no shuffling.
     # --------------------
-    "n_epochs": 300,
+    "n_epochs": 500,
     "batch_size": 1, 
     "hidden_size": 20,
     "num_rnn_layers": 2,
@@ -213,7 +213,7 @@ def make_all_dataloaders(data_dict, batch_size):
 
 def prep_datasets_for_s2s_ae_training(x_xlen_dict, device, pad_val, eos_val):
     data_dict = dict()
-    for key in ("train", "val", "test"):
+    for key in x_xlen_dict.keys():
         x, x_len = x_xlen_dict[key]
         x_rev, x_rev_shifted = s2s_utils.rearrange_data(x, x_len, pad_val, eos_val)
         data_dict[key] = s2s_utils.data_to_tensors(
@@ -427,28 +427,28 @@ def main():
         
         elif run_experiment == "learn:googlestock":
             # Load and split:
-            data = googlestock.load_stock_data(
+            d_full = googlestock.load_stock_data(
                 train_path=exp_settings["data_path_trainfile"], 
                 test_path=exp_settings["data_path_testfile"], 
                 normalize=True, 
                 time=False
             )
             d_train, d_val, d_test = googlestock.split_stock_data(
-                data, 
+                d_full, 
                 frac_train=exp_settings["train_frac"], 
                 frac_val=exp_settings["val_frac"], 
                 split_order=exp_settings["split_order"]
             )
             # Dynamically compute max_seq_len:
             max_timesteps = max((d_train.shape[0], d_val.shape[0], d_test.shape[0]))
-            total_timesteps = sum((d_train.shape[0], d_val.shape[0], d_test.shape[0]))
+            total_timesteps = d_full.shape[0]
             exp_settings["max_timesteps"] = max_timesteps
             print(f"`max_timesteps` computed: {max_timesteps}")
             # Preprocess for autoencoder:
-            d_train, d_val, d_test = \
-                add_sample_dim(d_train, d_val, d_test)  # pylint: disable=unbalanced-tuple-unpacking
-            d_train_len, d_val_len, d_test_len = \
-                get_fixed_seq_lens(d_train, d_val, d_test)  # pylint: disable=unbalanced-tuple-unpacking
+            d_train, d_val, d_test, d_full = \
+                add_sample_dim(d_train, d_val, d_test, d_full)  # pylint: disable=unbalanced-tuple-unpacking
+            d_train_len, d_val_len, d_test_len, d_full_len = \
+                get_fixed_seq_lens(d_train, d_val, d_test, d_full)  # pylint: disable=unbalanced-tuple-unpacking
             d_train, d_val, d_test = pad_to_max_seq_len(  # pylint: disable=unbalanced-tuple-unpacking
                 arrays=(d_train, d_val, d_test), 
                 max_seq_len=exp_settings["max_timesteps"], 
@@ -458,6 +458,7 @@ def main():
                 "train": (d_train, d_train_len),
                 "val": (d_val, d_val_len),
                 "test": (d_test, d_test_len),
+                "full": (d_full, d_full_len)
             }
             data_dict = prep_datasets_for_s2s_ae_training(
                 x_xlen_dict=x_xlen_dict, 
@@ -558,15 +559,17 @@ def main():
 
         # Save embeddings.
         if run_experiment == "learn:googlestock":
-            dls = (dataloaders_dict["test"],)  # NOTE: Could alternatively use full sequence.
+            embedding_dataloaders = (dataloaders_dict["full"],)  # NOTE: Could alternatively use "test" subset.
+            max_seq_len = total_timesteps
         else:
-            dls = (dataloaders_dict["train"], dataloaders_dict["val"], dataloaders_dict["test"])
+            embedding_dataloaders = (dataloaders_dict["train"], dataloaders_dict["val"], dataloaders_dict["test"])
+            max_seq_len = exp_settings["max_timesteps"]
         embeddings_filepath = os.path.join(os.path.abspath(embeddings_dir), exp_settings["embeddings_name"])
         embeddings = s2s_utils.get_embeddings(
             seq2seq=s2s, 
-            dataloaders=dls,
+            dataloaders=embedding_dataloaders,
             padding_value=exp_settings["pad_val"],
-            max_seq_len=exp_settings["max_timesteps"]
+            max_seq_len=max_seq_len
         )
         np.save(embeddings_filepath, embeddings)
         print(f"Generated and saved embeddings of shape: {embeddings.shape}. File: {embeddings_filepath}.")
@@ -599,9 +602,9 @@ def main():
                     generated_data, seq_lens = prepare_hns_gen_data(hider_name=hider_name, exp_settings=exp_settings)
                     np.savez(filepath_proc_cached, x=generated_data, x_len=seq_lens)
                 else:
-                    with np.load(filepath_proc_cached) as data:
-                        generated_data = data["x"]
-                        seq_lens = data["x_len"]
+                    with np.load(filepath_proc_cached) as d_full:
+                        generated_data = d_full["x"]
+                        seq_lens = d_full["x_len"]
                 
                 dataset, dataloader = get_hns_dataloader(
                     x=generated_data, 
