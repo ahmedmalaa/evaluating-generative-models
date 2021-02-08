@@ -32,7 +32,7 @@ def compute_alpha_precision(real_data, synthetic_data, emb_center, alternative_c
 
     n_steps = 30
     alphas  = np.linspace(0, 1, n_steps)
-        
+    k_coverage = 1
     
     Radii   = np.quantile(torch.sqrt(torch.sum((torch.tensor(real_data).float() - emb_center) ** 2, dim=1)), alphas)
     synth_to_center       = torch.sqrt(torch.sum((torch.tensor(synthetic_data).float() - emb_center) ** 2, dim=1))
@@ -41,19 +41,20 @@ def compute_alpha_precision(real_data, synthetic_data, emb_center, alternative_c
     nbrs_real = NearestNeighbors(n_neighbors = 2, n_jobs=-1, p=2).fit(real_data)
     real_to_real, _       = nbrs_real.kneighbors(real_data)
     real_to_real          = torch.from_numpy(real_to_real[:,1].squeeze())
-    
+   
+    synth_center          = torch.tensor(np.mean(synthetic_data, axis=0)).float()
+        
 
     if not alternative_coverage:
-        nbrs_synth = NearestNeighbors(n_neighbors = 1, n_jobs=-1, p=2).fit(synthetic_data)
+        nbrs_synth = NearestNeighbors(n_neighbors = k_coverage, n_jobs=-1, p=2).fit(synthetic_data)
         real_to_synth, real_to_synth_args = nbrs_synth.kneighbors(real_data)
-        real_to_synth         = torch.from_numpy(real_to_synth.squeeze())
-        real_to_synth_args    = real_to_synth_args.squeeze()
+        real_to_synth         = torch.from_numpy(real_to_synth[:,k_coverage-1])
+        real_to_synth_args    = real_to_synth_args[:,k_coverage-1]
         real_synth_closest    = synthetic_data[real_to_synth_args]
         real_synth_closest_d  = torch.sqrt(torch.sum((torch.tensor(real_synth_closest).float()- synth_center) ** 2, dim=1))
         closest_synth_Radii   = np.quantile(real_synth_closest_d, alphas)
     else:
-        synth_center          = torch.tensor(np.mean(synthetic_data, axis=0)).float()
-        synth_Radii   = np.quantile(torch.sqrt(torch.sum((torch.tensor(synthetic_data).float() - synth_center) ** 2, dim=1)), alphas)
+        synth_Radii          = np.quantile(torch.sqrt(torch.sum((torch.tensor(synthetic_data).float() - synth_center) ** 2, dim=1)), alphas)
         real_to_center       = torch.sqrt(torch.sum((torch.tensor(real_data).float() - synth_center) ** 2, dim=1))
     
     
@@ -83,7 +84,7 @@ def compute_alpha_precision(real_data, synthetic_data, emb_center, alternative_c
     authen = real_to_real.numpy()[synth_to_real_args] < synth_to_real
     authenticity = np.mean(authen)
 
-    Delta_precision_alpha = 1 - 2 * np.sum(np.abs(np.array(alphas) - np.array(alpha_precision_curve))) * (alphas[1] - alphas[0])
-    Delta_coverage_beta  = 1 - 2 * np.sum(np.abs(np.array(alphas) - np.array(beta_coverage_curve))) * (alphas[1] - alphas[0])
+    Delta_precision_alpha = np.sum(np.abs(np.array(alphas) - np.array(alpha_precision_curve))) * (alphas[1] - alphas[0])
+    Delta_coverage_beta  = np.sum(np.abs(np.array(alphas) - np.array(beta_coverage_curve))) * (alphas[1] - alphas[0])
     
     return alphas, alpha_precision_curve, beta_coverage_curve, Delta_precision_alpha, Delta_coverage_beta, authenticity

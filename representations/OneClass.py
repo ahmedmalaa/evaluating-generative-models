@@ -114,7 +114,7 @@ class OneClassLayer(BaseNet):
         self.warm_up_epochs = params['warm_up_epochs']
         self.weight_decay   = params['weight_decay']
         if torch.cuda.is_available():
-            self.device     = torch.device('c') 
+            self.device     = torch.device('cpu') 
         else:
             self.device     = torch.device('cpu')
         # set up the network
