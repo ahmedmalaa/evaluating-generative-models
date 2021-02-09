@@ -22,7 +22,7 @@ if not sys.warnoptions:
     import warnings
     warnings.simplefilter("ignore")
     
-device = 'cuda' # matrices are too big for gpu
+device = 'cpu' # matrices are too big for gpu
 
 
 def compute_alpha_precision(real_data, synthetic_data, emb_center, alternative_coverage=False):
@@ -84,7 +84,7 @@ def compute_alpha_precision(real_data, synthetic_data, emb_center, alternative_c
     authen = real_to_real.numpy()[synth_to_real_args] < synth_to_real
     authenticity = np.mean(authen)
 
-    Delta_precision_alpha = 2 * np.sum(np.array(alpha_precision_curve)) * (alphas[1] - alphas[0])
-    Delta_coverage_beta  = 2 * np.sum(np.array(beta_coverage_curve)) * (alphas[1] - alphas[0])
+    Delta_precision_alpha = 1 - 2 * np.sum(np.abs(np.array(alpha_precision_curve)-alphas)) * (alphas[1] - alphas[0])
+    Delta_coverage_beta   = 1 - 2 * np.sum(np.abs(np.array(beta_coverage_curve)-alpha)) * (alphas[1] - alphas[0])
     
     return alphas, alpha_precision_curve, beta_coverage_curve, Delta_precision_alpha, Delta_coverage_beta, authenticity
