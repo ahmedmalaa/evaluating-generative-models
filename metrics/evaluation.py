@@ -85,6 +85,6 @@ def compute_alpha_precision(real_data, synthetic_data, emb_center, alternative_c
     authenticity = np.mean(authen)
 
     Delta_precision_alpha = 1 - 2 * np.sum(np.abs(np.array(alpha_precision_curve)-alphas)) * (alphas[1] - alphas[0])
-    Delta_coverage_beta   = 1 - 2 * np.sum(np.abs(np.array(beta_coverage_curve)-alpha)) * (alphas[1] - alphas[0])
+    Delta_coverage_beta   = 1 - 2 * np.sum(np.abs(np.array(beta_coverage_curve)-alphas)) * (alphas[1] - alphas[0])
     
     return alphas, alpha_precision_curve, beta_coverage_curve, Delta_precision_alpha, Delta_coverage_beta, authenticity
