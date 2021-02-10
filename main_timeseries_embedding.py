@@ -29,7 +29,7 @@ from representations.ts_embedding import utils as s2s_utils
 #     "learn:amsterdam:hns_subset"
 #   - Apply existing embeddings:
 #     "apply:amsterdam:hns_competition_data"
-run_experiment = "learn:snp500"#"learn:googlestock"
+run_experiment = "learn:googlestock"
 
 models_dir = "./models/"
 embeddings_dir = "./data/ts_embedding/"
@@ -207,6 +207,8 @@ experiment_settings["apply:amsterdam:hns_competition_data"] = {
         "hamada",
         "jilljenn",
         "hns_baseline_add_noise",
+        # Augmented (10x hamada generated data):
+        "AUDITING",
     ],
     "data_file_name": "data.npz",
     "pad_val": experiment_settings["learn:amsterdam:hns_subset"]["pad_val"],
@@ -405,7 +407,10 @@ def prepare_hns_gen_data(hider_name, exp_settings):
 
     # Check padding mask integrity.
     if padding_mask.shape != (0,):
-        assert padding_mask.shape == (7695, 100, 71)
+        if hider_name != "AUDITING":
+            assert padding_mask.shape == (7695, 100, 71)
+        else:
+            assert padding_mask.shape == (76950, 100, 71)
         _check_padding_mask_integrity(padding_mask)
         note = "- has a padding mask."
     else:
