@@ -114,6 +114,21 @@ visualisations/
 jupyter/
 models/
 
+# generative_models/rgan related:
+generative_models/rgan/experiments/data/*
+!generative_models/rgan/experiments/data/placeholder
+generative_models/rgan/experiments/parameters/*
+!generative_models/rgan/experiments/parameters/placeholder
+generative_models/rgan/experiments/plots/*
+!generative_models/rgan/experiments/plots/placeholder
+generative_models/rgan/experiments/traces/*
+!generative_models/rgan/experiments/traces/placeholder
+generative_models/rgan/experiments/settings/*
+!generative_models/rgan/experiments/settings/cristobal_eicu.txt
+!generative_models/rgan/experiments/settings/cristobal_mnist.txt
+!generative_models/rgan/experiments/settings/mnistfull.txt
+!generative_models/rgan/experiments/settings/test.txt
+
 # Data dir content
 data/*
 !data/**/
