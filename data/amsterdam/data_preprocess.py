@@ -17,7 +17,10 @@ import pandas as pd
 from tqdm import tqdm
 from sklearn.preprocessing import MinMaxScaler
 
-from .data_utils import data_division
+try:
+    from .data_utils import data_division
+except ImportError:
+    from data_utils import data_division
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -198,6 +201,7 @@ class AmsterdamLoader(object):
         loaded_data.fill(padding_indicator)
 
         # For each unique id
+        lens = []
         print("Reshaping data...")
         for i in tqdm(range(no)):
 
@@ -207,6 +211,7 @@ class AmsterdamLoader(object):
 
             # Assign to the preprocessed data (Excluding ID)
             curr_no = len(curr_data)
+            lens.append(curr_no)
             if curr_no >= self.max_seq_len:
                 loaded_data[i, :, :] = curr_data[:self.max_seq_len, 1:]  # Shape: [1, max_seq_len, dim]
             else:
@@ -214,6 +219,8 @@ class AmsterdamLoader(object):
                     loaded_data[i, -curr_no:, :] = curr_data[:, 1:]  # Shape: [1, max_seq_len, dim]
                 else:
                     loaded_data[i, :curr_no, :] = curr_data[:, 1:]  # Shape: [1, max_seq_len, dim]
+        
+        print(f"Note: max. seq. length in dataset was {max(lens)}, shortened to {self.max_seq_len}")
 
         padding_mask = loaded_data == padding_indicator
         loaded_data = np.where(padding_mask, self.padding_fill, loaded_data)
