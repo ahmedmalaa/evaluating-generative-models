@@ -113,6 +113,7 @@ ENV/
 visualisations/
 jupyter/
 models/
+training_log.png
 
 # generative_models/rgan related:
 generative_models/rgan/experiments/data/*

@@ -12,6 +12,7 @@ import torch.optim as optim
 from data import amsterdam
 from data import googlestock
 from data import snp500
+from utils import prepare_amsterdam
 from representations.ts_embedding import Encoder, Decoder, Seq2Seq, train_seq2seq_autoencoder, iterate_eval_set
 from representations.ts_embedding import utils as s2s_utils
 
@@ -29,6 +30,7 @@ from representations.ts_embedding import utils as s2s_utils
 #     "learn:amsterdam:hns_subset"
 #   - Apply existing embeddings:
 #     "apply:amsterdam:hns_competition_data"
+#     "apply:amsterdam:combined_downsampled_subset"
 run_experiment = "learn:amsterdam:combined_downsampled_subset"
 
 models_dir = "./models/"
@@ -112,6 +114,7 @@ experiment_settings["learn:snp500"] = {
 # - "learn:amsterdam:combined_downsampled_subset"
 # NOTE: requires first running main() in ./data/amsterdam/data_scripts.py 
 # to make combined_downsampled5000_longitudinal_data.csv.
+_use_amsterdam_comb_version = "5000"  # Options: ("1000", "5000")
 experiment_settings["learn:amsterdam:combined_downsampled_subset"] = {
     "train_frac": 0.4,
     "val_frac": 0.2,
@@ -130,9 +133,9 @@ experiment_settings["learn:amsterdam:combined_downsampled_subset"] = {
     "num_rnn_layers": 2,
     "lr": 0.01,
     # --------------------
-    "data_path": "./data/amsterdam/combined_downsampled5000_longitudinal_data.csv",
-    "model_name": "s2s_ae_amsterdam_comb_<max_ts>.pt",
-    "embeddings_name": "amsterdam_embeddings_comb_<max_ts>.npy"
+    "data_path": f"./data/amsterdam/combined_downsampled{_use_amsterdam_comb_version}_longitudinal_data.csv",
+    "model_name": f"s2s_ae_amsterdam_comb{_use_amsterdam_comb_version}_<max_ts>.pt",
+    "embeddings_name": f"amsterdam_embeddings_comb{_use_amsterdam_comb_version}_<max_ts>.npy"
 }
 # - "learn:amsterdam:test_subset"
 experiment_settings["learn:amsterdam:test_subset"] = {
@@ -230,6 +233,30 @@ experiment_settings["apply:amsterdam:hns_competition_data"] = {
     "load_from_proc_cached": False,
 }
 
+_use_seq_len_apply_amsterdam_comb = 100
+experiment_settings["apply:amsterdam:combined_downsampled_subset"] = {
+    "gen_data_path": "./data/ts_generated/",
+    "generated_data_name": "amsterdam_combined_downsampled_subset_<model_name>.npy",
+    "models_list": [
+        "rgan",
+    ],
+    # --------------------
+    "include_time": False,
+    "n_features": 70,
+    "max_timesteps": _use_seq_len_apply_amsterdam_comb,
+    "pad_val": -999.,
+    "eos_val": +777., 
+    # --------------------
+    "batch_size": 1024, 
+    "hidden_size": 70,
+    "num_rnn_layers": 2,
+    # --------------------
+    "model_path": f"./models/s2s_ae_amsterdam_comb_{_use_seq_len_apply_amsterdam_comb}.pt",
+    # --------------------
+    "embeddings_name": f"amsterdam_embeddings_comb_{_use_seq_len_apply_amsterdam_comb}_<model_name>.npy",
+    # --------------------
+}
+
 # ----------------------------------------------------------------------------------------------------------------------
 # Utilities.
 
@@ -251,6 +278,21 @@ def prep_datasets_for_s2s_ae_training(x_xlen_dict, device, pad_val, eos_val):
         data_dict[key] = s2s_utils.data_to_tensors(
             x, x_len, x_rev, x_rev_shifted, float_type=torch.float32, device=device)
     return data_dict
+
+
+def get_inference_dataloader(x, x_len, device, exp_settings):
+    x_rev, x_rev_shifted = s2s_utils.rearrange_data(
+            x, x_len, exp_settings["pad_val"], exp_settings["eos_val"])
+
+    X, X_len, X_rev, X_rev_shifted = s2s_utils.data_to_tensors(
+        x, x_len, x_rev, x_rev_shifted, float_type=torch.float32, device=device)
+
+    dataset, dataloader = s2s_utils.make_dataloader(
+            data_tensors=(X, X_len, X_rev, X_rev_shifted), 
+            batch_size=exp_settings["batch_size"], 
+            shuffle=False)
+
+    return dataset, dataloader
 
 
 # Google stock data utilities.
@@ -284,17 +326,8 @@ def pad_to_max_seq_len(arrays, max_seq_len, pad_val):
 
 # Amsterdam data utilities.
 
-def load_and_prep_amsterdam(amsterdam_loader, settings):
-    assert amsterdam_loader.pad_before == False
-    raw_data, padding_mask, (train_idx, val_idx, test_idx) = \
-        amsterdam_loader.load_reshape_split_data(force_refresh=settings["data_loading_force_refresh"])
-    processed_data, imputed_processed_data = amsterdam.preprocess_data(
-        raw_data, 
-        padding_mask, 
-        padding_fill=settings["pad_val"],
-        time_feature_included=settings["include_time"],
-    )
-    seq_lens = amsterdam.padding_mask_to_seq_lens(padding_mask)
+def prepare_amsterdam_and_split(amsterdam_loader, settings):
+    imputed_processed_data, seq_lens, (train_idx, val_idx, test_idx) = prepare_amsterdam(amsterdam_loader, settings)
     data = {
         "train": (imputed_processed_data[train_idx], seq_lens[train_idx]),
         "val": (imputed_processed_data[val_idx], seq_lens[val_idx]),
@@ -432,21 +465,6 @@ def prepare_hns_gen_data(hider_name, exp_settings):
 
     return generated_data, seq_lens
 
-
-def get_hns_dataloader(x, x_len, device, exp_settings):
-    x_rev, x_rev_shifted = s2s_utils.rearrange_data(
-            x, x_len, exp_settings["pad_val"], exp_settings["eos_val"])
-
-    X, X_len, X_rev, X_rev_shifted = s2s_utils.data_to_tensors(
-        x, x_len, x_rev, x_rev_shifted, float_type=torch.float32, device=device)
-
-    dataset, dataloader = s2s_utils.make_dataloader(
-            data_tensors=(X, X_len, X_rev, X_rev_shifted), 
-            batch_size=exp_settings["batch_size"], 
-            shuffle=False)
-
-    return dataset, dataloader
-
 # ----------------------------------------------------------------------------------------------------------------------
 
 
@@ -542,7 +560,7 @@ def main():
                 pad_before=False,
                 padding_fill=exp_settings["pad_val"],
             )
-            x_xlen_dict = load_and_prep_amsterdam(
+            x_xlen_dict = prepare_amsterdam_and_split(
                 amsterdam_loader=amsterdam_loader, 
                 settings=exp_settings,
             )
@@ -568,7 +586,7 @@ def main():
                     pad_before=False,
                     padding_fill=exp_settings["pad_val"],
                 )
-                x_xlen_dict = load_and_prep_amsterdam(
+                x_xlen_dict = prepare_amsterdam_and_split(
                     amsterdam_loader=amsterdam_loader, 
                     settings=exp_settings,
                 )
@@ -693,22 +711,22 @@ def main():
     # Autoencoder application experiments.
     elif "apply:" in run_experiment:
         
+        # Load up the model.
+        encoder = Encoder(
+            input_size=exp_settings["n_features"], 
+            hidden_size=exp_settings["hidden_size"], 
+            num_rnn_layers=exp_settings["num_rnn_layers"]
+        )
+        decoder = Decoder(
+            input_size=exp_settings["n_features"], 
+            hidden_size=exp_settings["hidden_size"], 
+            num_rnn_layers=exp_settings["num_rnn_layers"]
+        )
+        s2s = Seq2Seq(encoder=encoder, decoder=decoder)
+        s2s.to(selected_device)
+        s2s.load_state_dict(torch.load(exp_settings["model_path"]))
+
         if run_experiment == "apply:amsterdam:hns_competition_data":
-            
-            # Load up the model.
-            encoder = Encoder(
-                input_size=exp_settings["n_features"], 
-                hidden_size=exp_settings["hidden_size"], 
-                num_rnn_layers=exp_settings["num_rnn_layers"]
-            )
-            decoder = Decoder(
-                input_size=exp_settings["n_features"], 
-                hidden_size=exp_settings["hidden_size"], 
-                num_rnn_layers=exp_settings["num_rnn_layers"]
-            )
-            s2s = Seq2Seq(encoder=encoder, decoder=decoder)
-            s2s.to(selected_device)
-            s2s.load_state_dict(torch.load(exp_settings["model_path"]))
 
             for hider_name in exp_settings["hiders_list"]:
                 
@@ -722,7 +740,7 @@ def main():
                         generated_data = d_full["x"]
                         seq_lens = d_full["x_len"]
                 
-                dataset, dataloader = get_hns_dataloader(
+                dataset, dataloader = get_inference_dataloader(
                     x=generated_data, 
                     x_len=seq_lens, 
                     device=selected_device, 
@@ -754,6 +772,54 @@ def main():
 
                 # Print info.
                 print(f"H&S submission '{hider_name}':")
+                print(f"AE Loss = {autoencoder_loss:.3f}")
+                print(f"Generated and saved embeddings of shape: {embeddings.shape}. File: {embeddings_filepath}.")
+                print("=" * 120)
+        
+        elif run_experiment == "apply:amsterdam:combined_downsampled_subset":
+            
+            for model_name in exp_settings["models_list"]:
+
+                filepath_gen_data = os.path.join(
+                    exp_settings["gen_data_path"],
+                    exp_settings["generated_data_name"].replace("<model_name>", model_name),
+                )
+                generated_data = np.load(filepath_gen_data)
+                seq_lens = np.ones((generated_data.shape[0],), dtype=int) * generated_data.shape[1]
+                # print(gen_data)
+                # print(seq_lens)
+
+                dataset, dataloader = get_inference_dataloader(
+                    x=generated_data, 
+                    x_len=seq_lens, 
+                    device=selected_device, 
+                    exp_settings=exp_settings)
+                
+                # Get autoencoder loss.
+                autoencoder_loss = iterate_eval_set(
+                    seq2seq=s2s, 
+                    dataloader=dataloader,
+                    padding_value=exp_settings["pad_val"],
+                    max_seq_len=exp_settings["max_timesteps"]
+                )
+
+                # Save embeddings.
+                embeddings_filepath = os.path.join(
+                    os.path.abspath(embeddings_dir), 
+                    exp_settings["embeddings_name"].replace("<model_name>", model_name)
+                )
+                embeddings = s2s_utils.get_embeddings(
+                    seq2seq=s2s, 
+                    dataloaders=(dataloader,),
+                    padding_value=exp_settings["pad_val"],
+                    max_seq_len=exp_settings["max_timesteps"]
+                )
+                np.save(embeddings_filepath, embeddings)
+                n_nan = np.isnan(embeddings).astype(int).sum()
+                assert n_nan == 0
+
+                # Print info.
+                print(f"Amsterdam comb+ds; model: '{model_name}':")
                 print(f"AE Loss = {autoencoder_loss:.3f}")
                 print(f"Generated and saved embeddings of shape: {embeddings.shape}. File: {embeddings_filepath}.")
                 print("=" * 120)

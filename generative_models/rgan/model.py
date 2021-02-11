@@ -13,6 +13,9 @@ from .differential_privacy.dp_sgd.dp_optimizer import sanitizer
 from .differential_privacy.privacy_accountant.tf import accountant
 
 
+CUSTOM_EXPERIMENT = False  # Custom modifications flag.
+
+
 # --- to do with latent space --- #
 
 def sample_Z(batch_size, seq_length, latent_dim, use_time=False, use_noisy_time=False):
@@ -289,6 +292,13 @@ def generator(z, hidden_units_g, seq_length, batch_size, num_generated_features,
         logits_2d = tf.matmul(rnn_outputs_2d, W_out_G) + b_out_G
         # output_2d = tf.multiply(tf.nn.tanh(logits_2d), scale_out_G)
         output_2d = tf.nn.tanh(logits_2d)
+        
+        # --------------------------------------------------------------------------------------------------------------
+        if CUSTOM_EXPERIMENT:
+            # Rescale to [0., 1.] as used across our experiments.
+            output_2d = (output_2d + 1.) * 0.5
+        # --------------------------------------------------------------------------------------------------------------
+
         output_3d = tf.reshape(output_2d, [-1, seq_length, num_generated_features])
     
     return output_3d

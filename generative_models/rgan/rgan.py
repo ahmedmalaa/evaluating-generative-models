@@ -72,13 +72,14 @@ DEFAULT_train_frac = 0.7  # (0.7, 0.3) split.
 DEFAULT_vis_freq = 1
 DEFAULT_eval_freq = 1
 
-dp_trace_enabled = True
+dp_trace_enabled = False
 target_eps = [0.125, 0.25, 0.5, 1, 2, 4, 8]  # For privacy accountant.
 
 
 def rgan(ori_data, parameters):
 
     out_data = None
+    model.CUSTOM_EXPERIMENT = True  # Custom modifications enabled.
 
     # --- get settings --- #
     settings = copy.deepcopy(DEFAULT_PARAMS)
@@ -425,7 +426,7 @@ def rgan(ori_data, parameters):
                 model.dump_parameters(settings["identifier"] + '_' + str(epoch), sess)
                 
                 if settings["custom_experiment"] is True:
-                    out_data = eval_sample[:samples['train'].shape[0], :, :].copy()
+                    out_data = eval_sample[:eval_size_target, :, :].copy()
         
             ## prob density (if available)
             if not pdf is None:
@@ -484,7 +485,7 @@ def rgan(ori_data, parameters):
     model.dump_parameters(identifier=settings["identifier"] + '_' + str(epoch), sess=sess)
 
     if settings["custom_experiment"] is True and out_data is None:
-        out_data = eval_sample[:samples['train'].shape[0], :, :].copy()
+        out_data = eval_sample[:eval_size_target, :, :].copy()
     print("Final generated data shape:", eval_sample.shape)
 
     return out_data
