@@ -29,7 +29,7 @@ from representations.ts_embedding import utils as s2s_utils
 #     "learn:amsterdam:hns_subset"
 #   - Apply existing embeddings:
 #     "apply:amsterdam:hns_competition_data"
-run_experiment = "learn:googlestock"
+run_experiment = "learn:amsterdam:combined_downsampled_subset"
 
 models_dir = "./models/"
 embeddings_dir = "./data/ts_embedding/"
@@ -110,27 +110,29 @@ experiment_settings["learn:snp500"] = {
 
 # Amsterdam Data Learn Autoencoder Experiments:
 # - "learn:amsterdam:combined_downsampled_subset"
+# NOTE: requires first running main() in ./data/amsterdam/data_scripts.py 
+# to make combined_downsampled5000_longitudinal_data.csv.
 experiment_settings["learn:amsterdam:combined_downsampled_subset"] = {
     "train_frac": 0.4,
     "val_frac": 0.2,
     "n_features": 70,
     # --------------------
     "include_time": False,
-    "max_timesteps": 2000,
+    "max_timesteps": [10, 100, 1000],
     "pad_val": -999.,
     "eos_val": +777., 
     "data_split_seed": 12345,
     "data_loading_force_refresh": True,
     # --------------------
-    "n_epochs": 50,
+    "n_epochs": [1000, 200, 50],
     "batch_size": 1024, 
     "hidden_size": 70,
     "num_rnn_layers": 2,
     "lr": 0.01,
     # --------------------
-    "data_path": "./data/amsterdam/combined_downsampled_longitudinal_data.csv",
-    "model_name": "s2s_ae_amsterdam_comb.pt",
-    "embeddings_name": "amsterdam_embeddings_comb.npy"
+    "data_path": "./data/amsterdam/combined_downsampled5000_longitudinal_data.csv",
+    "model_name": "s2s_ae_amsterdam_comb_<max_ts>.pt",
+    "embeddings_name": "amsterdam_embeddings_comb_<max_ts>.npy"
 }
 # - "learn:amsterdam:test_subset"
 experiment_settings["learn:amsterdam:test_subset"] = {
@@ -445,6 +447,8 @@ def get_hns_dataloader(x, x_len, device, exp_settings):
 
     return dataset, dataloader
 
+# ----------------------------------------------------------------------------------------------------------------------
+
 
 def main():
 
@@ -526,10 +530,7 @@ def main():
             )
             dataloaders_dict = make_all_dataloaders(data_dict=data_dict, batch_size=exp_settings["batch_size"])
 
-        elif (
-            run_experiment == "learn:amsterdam:combined_downsampled_subset" or 
-            run_experiment == "learn:amsterdam:test_subset"
-        ):
+        elif run_experiment == "learn:amsterdam:test_subset":
             amsterdam_loader = amsterdam.AmsterdamLoader(
                 data_path=os.path.abspath(exp_settings["data_path"]),
                 max_seq_len=exp_settings["max_timesteps"],
@@ -552,6 +553,32 @@ def main():
                 eos_val=exp_settings["eos_val"],
             )
             dataloaders_dict = make_all_dataloaders(data_dict, batch_size=exp_settings["batch_size"])
+        
+        elif run_experiment == "learn:amsterdam:combined_downsampled_subset":
+            dataloaders_dict = []
+            for max_timesteps in exp_settings["max_timesteps"]:
+                amsterdam_loader = amsterdam.AmsterdamLoader(
+                    data_path=os.path.abspath(exp_settings["data_path"]),
+                    max_seq_len=max_timesteps,
+                    seed=exp_settings["data_split_seed"],
+                    train_rate=exp_settings["train_frac"],
+                    val_rate=exp_settings["val_frac"],
+                    include_time=exp_settings["include_time"],
+                    debug_data=False,
+                    pad_before=False,
+                    padding_fill=exp_settings["pad_val"],
+                )
+                x_xlen_dict = load_and_prep_amsterdam(
+                    amsterdam_loader=amsterdam_loader, 
+                    settings=exp_settings,
+                )
+                data_dict = prep_datasets_for_s2s_ae_training(
+                    x_xlen_dict, 
+                    device=selected_device, 
+                    pad_val=exp_settings["pad_val"],
+                    eos_val=exp_settings["eos_val"],
+                )
+                dataloaders_dict.append( make_all_dataloaders(data_dict, batch_size=exp_settings["batch_size"]))
         
         elif run_experiment == "learn:amsterdam:hns_subset":
             # This loader matches the H&S competition data loading settings.
@@ -593,44 +620,75 @@ def main():
 
         opt = optim.Adam(s2s.parameters(), lr=exp_settings["lr"])
 
-        train_seq2seq_autoencoder(
-            seq2seq=s2s, 
-            optimizer=opt,
-            train_dataloader=dataloaders_dict["train"],
-            val_dataloader=dataloaders_dict["val"], 
-            n_epochs=exp_settings["n_epochs"], 
-            batch_size=exp_settings["batch_size"],
-            padding_value=exp_settings["pad_val"],
-            max_seq_len=exp_settings["max_timesteps"],
-        )
-        eval_loss = iterate_eval_set(
-            seq2seq=s2s, 
-            dataloader=dataloaders_dict["test"],
-            padding_value=exp_settings["pad_val"],
-            max_seq_len=exp_settings["max_timesteps"]
-        )
-        print(f"Ev.Ls.={eval_loss:.3f}")
-
-        # Save model.
-        model_filepath = os.path.join(os.path.abspath(models_dir), exp_settings["model_name"])
-        torch.save(s2s.state_dict(), model_filepath)
-
-        # Save embeddings.
-        if run_experiment == "learn:googlestock":
-            embedding_dataloaders = (dataloaders_dict["full"],)  # NOTE: Could alternatively use "test" subset.
-            max_seq_len = total_timesteps
+        if run_experiment == "learn:amsterdam:combined_downsampled_subset":
+            # Multiple training runs.
+            
+            n_epochs_list = exp_settings["n_epochs"]
+            max_timesteps_list = exp_settings["max_timesteps"]
+            
+            assert len(dataloaders_dict) == len(n_epochs_list)
+            
+            model_name_list = \
+                [exp_settings["model_name"].replace("<max_ts>", str(max_ts)) for max_ts in max_timesteps_list]
+            embeddings_name_list = \
+                [exp_settings["embeddings_name"].replace("<max_ts>", str(max_ts)) for max_ts in max_timesteps_list]
+        
         else:
-            embedding_dataloaders = (dataloaders_dict["train"], dataloaders_dict["val"], dataloaders_dict["test"])
-            max_seq_len = exp_settings["max_timesteps"]
-        embeddings_filepath = os.path.join(os.path.abspath(embeddings_dir), exp_settings["embeddings_name"])
-        embeddings = s2s_utils.get_embeddings(
-            seq2seq=s2s, 
-            dataloaders=embedding_dataloaders,
-            padding_value=exp_settings["pad_val"],
-            max_seq_len=max_seq_len
+            # Single training run.
+            n_epochs_list = [exp_settings["n_epochs"]]
+            max_timesteps_list = [exp_settings["max_timesteps"]]
+            dataloaders_dict = [dataloaders_dict]
+            model_name_list = [exp_settings["model_name"]]
+            embeddings_name_list = [exp_settings["embeddings_name"]]
+        
+        assert (
+            len(n_epochs_list) == 
+            len(max_timesteps_list) == 
+            len(dataloaders_dict) == 
+            len(model_name_list) == 
+            len(embeddings_name_list)
         )
-        np.save(embeddings_filepath, embeddings)
-        print(f"Generated and saved embeddings of shape: {embeddings.shape}. File: {embeddings_filepath}.")
+
+        for idx in range(len(n_epochs_list)):
+            train_seq2seq_autoencoder(
+                seq2seq=s2s, 
+                optimizer=opt,
+                train_dataloader=dataloaders_dict[idx]["train"],
+                val_dataloader=dataloaders_dict[idx]["val"], 
+                n_epochs=n_epochs_list[idx], 
+                batch_size=exp_settings["batch_size"],
+                padding_value=exp_settings["pad_val"],
+                max_seq_len=max_timesteps_list[idx],
+            )
+            eval_loss = iterate_eval_set(
+                seq2seq=s2s, 
+                dataloader=dataloaders_dict[idx]["test"],
+                padding_value=exp_settings["pad_val"],
+                max_seq_len=max_timesteps_list[idx],
+            )
+            print(f"Ev.Ls.={eval_loss:.3f}")
+
+            # Save model.
+            model_filepath = os.path.join(os.path.abspath(models_dir), model_name_list[idx])
+            torch.save(s2s.state_dict(), model_filepath)
+
+            # Save embeddings.
+            if run_experiment == "learn:googlestock":
+                embedding_dataloaders = (dataloaders_dict[idx]["full"],)  # NOTE: Could alternatively use "test" subset.
+                max_seq_len = total_timesteps
+            else:
+                embedding_dataloaders = \
+                    (dataloaders_dict[idx]["train"], dataloaders_dict[idx]["val"], dataloaders_dict[idx]["test"])
+                max_seq_len = max_timesteps_list[idx]
+            embeddings_filepath = os.path.join(os.path.abspath(embeddings_dir), embeddings_name_list[idx])
+            embeddings = s2s_utils.get_embeddings(
+                seq2seq=s2s, 
+                dataloaders=embedding_dataloaders,
+                padding_value=exp_settings["pad_val"],
+                max_seq_len=max_seq_len
+            )
+            np.save(embeddings_filepath, embeddings)
+            print(f"Generated and saved embeddings of shape: {embeddings.shape}. File: {embeddings_filepath}.")
     
     # Autoencoder application experiments.
     elif "apply:" in run_experiment:
