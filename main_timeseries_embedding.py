@@ -25,17 +25,27 @@ from representations.ts_embedding import utils as s2s_utils
 #     "learn:dummy" 
 #     "learn:googlestock"
 #     "learn:snp500" 
-#     "learn:amsterdam:combined_downsampled_subset" 
-#     "learn:amsterdam:test_subset"
-#     "learn:amsterdam:hns_subset"
+#     "learn:amsterdam:combds:N"
+#     "learn:amsterdam:test"
+#     "learn:amsterdam:hns"
 #   - Apply existing embeddings:
-#     "apply:amsterdam:hns_competition_data"
-#     "apply:amsterdam:combined_downsampled_subset"
-run_experiment = "apply:amsterdam:combined_downsampled_subset"
+#     "apply:amsterdam:hns"
+#     "apply:amsterdam:combds:N:T"
+# NOTE: 
+# * combds = combined+downsampled; N = num. examples; T = seq. len.
+# * N = 1000 or 5000
+# * T = set below. (amsterdam_combds_T_list)
+# NOTE: 
+# * to use amsterdam:combds requires first running ./data/amsterdam/data_scripts.py which generates 
+#   combined_downsampledN_longitudinal_data.csv.
+run_experiment = "learn:amsterdam:combds:1000"
 
 models_dir = "./models/"
 embeddings_dir = "./data/ts_embedding/"
 experiment_settings = dict()
+
+amsterdam_combds_T_list = [10, 100, 1000]
+amsterdam_combds_T_train_epochs = [1000, 200, 50]
 
 # Dummy Data Learn Autoencoder Experiment:
 experiment_settings["learn:dummy"] = {
@@ -111,34 +121,36 @@ experiment_settings["learn:snp500"] = {
 
 
 # Amsterdam Data Learn Autoencoder Experiments:
-# - "learn:amsterdam:combined_downsampled_subset"
-# NOTE: requires first running main() in ./data/amsterdam/data_scripts.py 
-# to make combined_downsampled5000_longitudinal_data.csv.
-_use_amsterdam_comb_version = "5000"  # Options: ("1000", "5000")
-experiment_settings["learn:amsterdam:combined_downsampled_subset"] = {
+# - "learn:amsterdam:combds"
+if "learn:amsterdam:combds" in run_experiment:
+    _amsterdam_combds_N = run_experiment.split(":")[-1]
+    run_experiment = "learn:amsterdam:combds"
+else:
+    _amsterdam_combds_N = "NOT_SET"
+experiment_settings["learn:amsterdam:combds"] = {
     "train_frac": 0.4,
     "val_frac": 0.2,
     "n_features": 70,
     # --------------------
     "include_time": False,
-    "max_timesteps": [10, 100, 1000],
+    "max_timesteps": amsterdam_combds_T_list,
     "pad_val": -999.,
     "eos_val": +777., 
     "data_split_seed": 12345,
     "data_loading_force_refresh": True,
     # --------------------
-    "n_epochs": [1000, 200, 50],
+    "n_epochs": amsterdam_combds_T_train_epochs,
     "batch_size": 1024, 
     "hidden_size": 70,
     "num_rnn_layers": 2,
     "lr": 0.01,
     # --------------------
-    "data_path": f"./data/amsterdam/combined_downsampled{_use_amsterdam_comb_version}_longitudinal_data.csv",
-    "model_name": f"s2s_ae_amsterdam_comb{_use_amsterdam_comb_version}_<max_ts>.pt",
-    "embeddings_name": f"amsterdam_embeddings_comb{_use_amsterdam_comb_version}_<max_ts>.npy"
+    "data_path": f"./data/amsterdam/combined_downsampled{_amsterdam_combds_N}_longitudinal_data.csv",
+    "model_name": f"s2s_ae_amsterdam-combds-{_amsterdam_combds_N}-<max_ts>.pt",
+    "embeddings_name": f"amsterdam-combds-{_amsterdam_combds_N}-<max_ts>_embeddings.npy"
 }
-# - "learn:amsterdam:test_subset"
-experiment_settings["learn:amsterdam:test_subset"] = {
+# - "learn:amsterdam:test"
+experiment_settings["learn:amsterdam:test"] = {
     "train_frac": 0.4,
     "val_frac": 0.2,
     "n_features": 70,
@@ -157,11 +169,11 @@ experiment_settings["learn:amsterdam:test_subset"] = {
     "lr": 0.01,
     # --------------------
     "data_path": "./data/amsterdam/test_longitudinal_data.csv",
-    "model_name": "s2s_ae_amsterdam_test.pt",
-    "embeddings_name": "amsterdam_embeddings_test.npy"
+    "model_name": "s2s_ae_amsterdam-test.pt",
+    "embeddings_name": "amsterdam-test_embeddings.npy"
 }
-# - "learn:amsterdam:hns_subset"
-experiment_settings["learn:amsterdam:hns_subset"] = {
+# - "learn:amsterdam:hns"
+experiment_settings["learn:amsterdam:hns"] = {
     "train_frac": 0.4,
     "val_frac": 0.2,
     "n_features": 70,
@@ -188,12 +200,12 @@ experiment_settings["learn:amsterdam:hns_subset"] = {
     "lr": 0.01,
     # --------------------
     "data_path": "./data/amsterdam/hns_test_longitudinal_data.csv",  # NOTE: copy of test_longitudinal_data.csv
-    "model_name": "s2s_ae_amsterdam_hns.pt",
-    "embeddings_name": "amsterdam_embeddings_hns.npy"
+    "model_name": "s2s_ae_amsterdam-hns.pt",
+    "embeddings_name": "amsterdam-hns_embeddings.npy"
 }
 
 # Hide-and-seek Competition Apply Autoencoder Experiment:
-experiment_settings["apply:amsterdam:hns_competition_data"] = {
+experiment_settings["apply:amsterdam:hns"] = {
     "gen_data_path": "./data/ts_generated/hns_comp/",
     "hiders_list": [
         "csetraynor", 
@@ -216,15 +228,15 @@ experiment_settings["apply:amsterdam:hns_competition_data"] = {
         "AUDITING",
     ],
     "data_file_name": "data.npz",
-    "pad_val": experiment_settings["learn:amsterdam:hns_subset"]["pad_val"],
-    "eos_val": experiment_settings["learn:amsterdam:hns_subset"]["eos_val"],
-    "max_timesteps": experiment_settings["learn:amsterdam:hns_subset"]["max_timesteps"],
+    "pad_val": experiment_settings["learn:amsterdam:hns"]["pad_val"],
+    "eos_val": experiment_settings["learn:amsterdam:hns"]["eos_val"],
+    "max_timesteps": experiment_settings["learn:amsterdam:hns"]["max_timesteps"],
     # --------------------
     "model_path": "./models/s2s_ae_amsterdam_hns.pt",
-    "batch_size": experiment_settings["learn:amsterdam:hns_subset"]["batch_size"], 
-    "n_features": experiment_settings["learn:amsterdam:hns_subset"]["n_features"],
-    "hidden_size": experiment_settings["learn:amsterdam:hns_subset"]["hidden_size"],
-    "num_rnn_layers": experiment_settings["learn:amsterdam:hns_subset"]["num_rnn_layers"],
+    "batch_size": experiment_settings["learn:amsterdam:hns"]["batch_size"], 
+    "n_features": experiment_settings["learn:amsterdam:hns"]["n_features"],
+    "hidden_size": experiment_settings["learn:amsterdam:hns"]["hidden_size"],
+    "num_rnn_layers": experiment_settings["learn:amsterdam:hns"]["num_rnn_layers"],
     # --------------------
     "embeddings_subdir": "hns_comp",
     "embeddings_name": "hns_embeddings_<uname>.npy",
@@ -233,21 +245,26 @@ experiment_settings["apply:amsterdam:hns_competition_data"] = {
     "load_from_proc_cached": False,
 }
 
-_use_amsterdam_comb_version = "1000"
-_use_amsterdam_seq_len = 100
-experiment_settings["apply:amsterdam:combined_downsampled_subset"] = {
+if "apply:amsterdam:combds" in run_experiment:
+    _amsterdam_combds_N = run_experiment.split(":")[-2]
+    _amsterdam_combds_T = int(run_experiment.split(":")[-1])
+    run_experiment = "apply:amsterdam:combds"
+else:
+    _amsterdam_combds_N = "NOT_SET"
+    _amsterdam_combds_T = "NOT_SET"
+experiment_settings["apply:amsterdam:combds"] = {
     "gen_data_path": "./data/ts_generated/",
     "generated_data_name": \
-        f"amsterdam_embeddings_comb{_use_amsterdam_comb_version}_{_use_amsterdam_seq_len}_<model_name>.npy",
+        f"amsterdam-combds-{_amsterdam_combds_N}-{_amsterdam_combds_T}_embeddings_<model_name>.npy",
     "models_list": [
         "rgan",
-        "rgan_dp",
-        "timegan",
+        #"rgan_dp",
+        #"timegan",
     ],
     # --------------------
     "include_time": False,
     "n_features": 70,
-    "max_timesteps": _use_amsterdam_seq_len,
+    "max_timesteps": _amsterdam_combds_T,
     "pad_val": -999.,
     "eos_val": +777., 
     # --------------------
@@ -256,10 +273,10 @@ experiment_settings["apply:amsterdam:combined_downsampled_subset"] = {
     "num_rnn_layers": 2,
     # --------------------
     "model_path": \
-        f"./models/s2s_ae_amsterdam_comb{_use_amsterdam_comb_version}_{_use_amsterdam_seq_len}.pt",
+        f"./models/s2s_ae_amsterdam-combds-{_amsterdam_combds_N}-{_amsterdam_combds_T}.pt",
     # --------------------
     "embeddings_name": \
-        f"amsterdam_embeddings_comb{_use_amsterdam_comb_version}_{_use_amsterdam_seq_len}_<model_name>.npy",
+        f"amsterdam-combds-{_amsterdam_combds_N}-{_amsterdam_combds_T}_embeddings_<model_name>.npy",
     # --------------------
 }
 
@@ -554,7 +571,7 @@ def main():
             )
             dataloaders_dict = make_all_dataloaders(data_dict=data_dict, batch_size=exp_settings["batch_size"])
 
-        elif run_experiment == "learn:amsterdam:test_subset":
+        elif run_experiment == "learn:amsterdam:test":
             amsterdam_loader = amsterdam.AmsterdamLoader(
                 data_path=os.path.abspath(exp_settings["data_path"]),
                 max_seq_len=exp_settings["max_timesteps"],
@@ -578,7 +595,7 @@ def main():
             )
             dataloaders_dict = make_all_dataloaders(data_dict, batch_size=exp_settings["batch_size"])
         
-        elif run_experiment == "learn:amsterdam:combined_downsampled_subset":
+        elif "learn:amsterdam:combds" in run_experiment:
             dataloaders_dict = []
             for max_timesteps in exp_settings["max_timesteps"]:
                 amsterdam_loader = amsterdam.AmsterdamLoader(
@@ -604,7 +621,7 @@ def main():
                 )
                 dataloaders_dict.append( make_all_dataloaders(data_dict, batch_size=exp_settings["batch_size"]))
         
-        elif run_experiment == "learn:amsterdam:hns_subset":
+        elif run_experiment == "learn:amsterdam:hns":
             # This loader matches the H&S competition data loading settings.
             amsterdam_loader = amsterdam.AmsterdamLoader(
                 data_path=os.path.abspath(exp_settings["data_path"]),
@@ -628,7 +645,7 @@ def main():
                 eos_val=exp_settings["eos_val"],
             )
             dataloaders_dict = make_all_dataloaders(data_dict, batch_size=exp_settings["batch_size"])
-        
+
         encoder = Encoder(
             input_size=exp_settings["n_features"], 
             hidden_size=exp_settings["hidden_size"], 
@@ -644,7 +661,7 @@ def main():
 
         opt = optim.Adam(s2s.parameters(), lr=exp_settings["lr"])
 
-        if run_experiment == "learn:amsterdam:combined_downsampled_subset":
+        if "learn:amsterdam:combds" in run_experiment:
             # Multiple training runs.
             
             n_epochs_list = exp_settings["n_epochs"]
@@ -732,7 +749,7 @@ def main():
         s2s.to(selected_device)
         s2s.load_state_dict(torch.load(exp_settings["model_path"]))
 
-        if run_experiment == "apply:amsterdam:hns_competition_data":
+        if run_experiment == "apply:amsterdam:hns":
 
             for hider_name in exp_settings["hiders_list"]:
                 
@@ -782,8 +799,14 @@ def main():
                 print(f"Generated and saved embeddings of shape: {embeddings.shape}. File: {embeddings_filepath}.")
                 print("=" * 120)
         
-        elif run_experiment == "apply:amsterdam:combined_downsampled_subset":
+        elif "apply:amsterdam:combds" in run_experiment:
             
+            for model_name in exp_settings["models_list"]:
+                if model_name in ("rgan", "rgan_dp"):
+                    exp_settings["models_list"].append(f"{model_name}_last")
+                    exp_settings["models_list"].append(f"{model_name}_best")
+            exp_settings["models_list"] = [x for x in exp_settings["models_list"] if x not in ("rgan", "rgan_dp")]
+
             for model_name in exp_settings["models_list"]:
 
                 filepath_gen_data = os.path.join(
@@ -792,11 +815,14 @@ def main():
                 )
                 generated_data = np.load(filepath_gen_data)
                 seq_lens = np.ones((generated_data.shape[0],), dtype=int) * generated_data.shape[1]
+
+                # TODO: Add exp/data settings preview at the beginning.
+                # TODO: Add exception for unknown exp/data
+                # TODO: Integrate this properly.
+                ###########
                 # print(gen_data)
                 # print(seq_lens)
-
-                ############
-                # TEMP__exp_settings = experiment_settings["learn:amsterdam:combined_downsampled_subset"]
+                # TEMP__exp_settings = experiment_settings["learn:amsterdam:combds"]
                 # TEMP__exp_settings["max_timesteps"] = 100 ####
                 # TEMP__exp_settings["data_path"] = "./data/amsterdam/combined_downsampled1000_longitudinal_data.csv"
                 # amsterdam_loader = amsterdam.AmsterdamLoader(
@@ -811,7 +837,7 @@ def main():
                 #     padding_fill=TEMP__exp_settings["pad_val"],
                 # )
                 # _, seq_lens, _ = prepare_amsterdam(amsterdam_loader=amsterdam_loader, settings=TEMP__exp_settings)  # USE ORIG SEQ LENS
-                #############
+                ############
 
                 dataset, dataloader = get_inference_dataloader(
                     x=generated_data, 

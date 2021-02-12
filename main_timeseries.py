@@ -3,7 +3,7 @@
 Author: Evgeny Saveliev (e.s.saveliev@gmail.com)
 """
 import os
-import copy
+import pprint
 
 import numpy as np
 
@@ -17,14 +17,14 @@ from utils import prepare_amsterdam
 
 # Options:
 # use_data:
-#   - "amsterdam:combined_downsampled_subset"
+#   - "amsterdam:combds:N:T"  # NOTE: See main_timeseries_embedding.py for N and T.
 #   - "snp500"
 # use_model:
 #   - "timegan"
 #   - "rgan"
 #   - "rgan_dp"
-use_data = "amsterdam:combined_downsampled_subset"
-use_model = "timegan"
+use_data = "amsterdam:combds:1000:100"
+use_model = "rgan_dp"
 
 # Import after choosing model to allow for different environments:
 if use_model in ("rgan", "rgan_dp"):
@@ -34,21 +34,26 @@ if use_model == "timegan":
 
 generated_data_dir = "./data/ts_generated/"
 
-_use_amsterdam_comb_version = "1000"  # Options: ("1000", "5000")
-_use_amsterdam_seq_len = 100  # Options: (10, 100, 100)
+if "amsterdam:combds" in use_data:
+    _amsterdam_combds_N = use_data.split(":")[-2]
+    _amsterdam_combds_T = int(use_data.split(":")[-1])
+    use_data = "amsterdam:combds"
+else:
+    _amsterdam_combds_N = "NOT_SET"
+    _amsterdam_combds_T = "NOT_SET"
 amsterdam_data_settings = {
     "train_frac": 0.4,
     "val_frac": 0.2,
     "n_features": 70,
     "include_time": False,
-    "max_timesteps": _use_amsterdam_seq_len,
+    "max_timesteps": _amsterdam_combds_T,
     "pad_val": 0.5,
     "data_split_seed": 12345,
     "data_loading_force_refresh": True,
     # --------------------
-    "data_path": f"data/amsterdam/combined_downsampled{_use_amsterdam_comb_version}_longitudinal_data.csv",
+    "data_path": f"data/amsterdam/combined_downsampled{_amsterdam_combds_N}_longitudinal_data.csv",
     "embeddings_name": \
-        f"amsterdam_embeddings_comb{_use_amsterdam_comb_version}_{_use_amsterdam_seq_len}"
+        f"amsterdam-combds-{_amsterdam_combds_N}-{_amsterdam_combds_T}_embeddings"
 }
 
 snp500_data_settings = {
@@ -85,8 +90,8 @@ rgan_experiment_settings = {
         "latent_dim": 10,
         "l2norm_bound": 1e-05,
         "learning_rate": 0.1,
-        "batch_size": 28,
-        "num_epochs": 100,
+        "batch_size": 256,
+        "num_epochs": 1000,
         "D_rounds": 1,
         "G_rounds": 3,
         # DP Settings:
@@ -97,24 +102,62 @@ rgan_experiment_settings = {
     "generated_data_filename_last": "<embeddings_name>_rgan_last.npy",
 }
 
-rgan_dp_experiment_settings = copy.deepcopy(rgan_experiment_settings)
-rgan_dp_experiment_settings["model_params"]["dp"] = True
-rgan_dp_experiment_settings["model_params"]["dp_sigma"] = 0.0001  # 1e-05
-rgan_dp_experiment_settings["generated_data_filename_best"] = "<embeddings_name>_rgan_dp_best.npy"
-rgan_dp_experiment_settings["generated_data_filename_last"] = "<embeddings_name>_rgan_dp_last.npy"
+rgan_dp_experiment_settings = {
+    "model_params": {
+        "hidden_units_g": 100,
+        "hidden_units_d": 100,
+        "latent_dim": 10,
+        "l2norm_bound": 1e-05,
+        "learning_rate": 0.1,
+        "batch_size": 256,
+        "num_epochs": 1000,
+        "D_rounds": 3,
+        "G_rounds": 1,
+        # DP Settings:
+        "dp": True,
+        "dp_sigma": 0.001  # 1e-05
+    },
+    "generated_data_filename_best": "<embeddings_name>_rgan_dp_best.npy",
+    "generated_data_filename_last": "<embeddings_name>_rgan_dp_last.npy",
+}
 
 
 # ----------------------------------------------------------------------------------------------------------------------
 # Utilities.
 
-# Empty.
+def print_exp_info(data_used, model_used, data_settings, exp_settings):
+    print("=" * 80)
+    print(f"\nExperiment: data='{data_used}' model='{model_used}'")
+    print("\nData settings:\n")
+    pprint.pprint(data_settings, indent=4)
+    print("\nModel settings:\n")
+    pprint.pprint(exp_settings, indent=4)
+    print("\n", "=" * 80)
+
 
 # ----------------------------------------------------------------------------------------------------------------------
 
 def main():
-    
-    if use_data == "amsterdam:combined_downsampled_subset":
+
+    # Collect settings:
+    if use_data == "amsterdam:combds":
         active_data_settings = amsterdam_data_settings
+    elif use_data == "snp500":
+        active_data_settings = snp500_data_settings
+    else:
+        raise ValueError(f"Unknown data source selected: '{use_data}'.")
+    
+    if use_model == "timegan":
+        active_experiment_settings = timegan_experiment_settings
+    elif use_model in ("rgan", "rgan_dp"):
+        active_experiment_settings = rgan_experiment_settings if use_model == "rgan" else  rgan_dp_experiment_settings
+    else:
+        raise ValueError(f"Unknown model selected: '{use_model}'.")
+
+    print_exp_info(use_data, use_model, active_data_settings, active_experiment_settings)
+    
+    # Prepare data:
+    if use_data == "amsterdam:combds":
         amsterdam_loader = amsterdam.AmsterdamLoader(
             data_path=os.path.abspath(active_data_settings["data_path"]),
             max_seq_len=active_data_settings["max_timesteps"],
@@ -129,7 +172,6 @@ def main():
         original_data, seq_lens, _ = prepare_amsterdam(amsterdam_loader=amsterdam_loader, settings=active_data_settings)
     
     elif use_data == "snp500":
-        active_data_settings = snp500_data_settings
         original_data, seq_lens, _ = snp500.load_snp_data(
             data_path=snp500_data_settings["data_path"], 
             npz_cache_filepath=snp500_data_settings["npz_cache_filepath"], 
@@ -139,15 +181,11 @@ def main():
             force_refresh=snp500_data_settings["data_loading_force_refresh"], 
         )
 
-    else:
-        raise ValueError(f"Unknown data source selected: '{use_data}'.")
-
+    # Run model:
     if use_model == "timegan":
-        active_experiment_settings = timegan_experiment_settings
         generated_data = timegan(ori_data=original_data, parameters=active_experiment_settings["model_params"])
     
     elif use_model in ("rgan", "rgan_dp"):
-        active_experiment_settings = rgan_experiment_settings if use_model == "rgan" else  rgan_dp_experiment_settings
         active_experiment_settings["model_params"]["data"] = use_data
         active_experiment_settings["model_params"]["identifier"] = use_model
         active_experiment_settings["model_params"]["custom_experiment"] = True
@@ -181,9 +219,6 @@ def main():
             f"Generated and saved timeseries data of shape: {generated_data_best.shape}. File: {generated_data_filepath_best}.")
         print(f"Generative model: {use_model}, data: {use_data}\n" 
             f"Generated and saved timeseries data of shape: {generated_data_last.shape}. File: {generated_data_filepath_last}.")
-
-    else:
-        raise ValueError(f"Unknown model selected: '{use_model}'.")
     
     if use_model not in ("rgan", "rgan_dp"):
         generated_data_filepath = os.path.join(
