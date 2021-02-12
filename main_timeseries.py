@@ -10,8 +10,7 @@ import numpy as np
 from data import amsterdam
 from data import snp500
 from utils import prepare_amsterdam
-from generative_models.timegan import timegan
-from generative_models.rgan import rgan
+
 
 # ----------------------------------------------------------------------------------------------------------------------
 # Set experiment settings here:
@@ -25,7 +24,13 @@ from generative_models.rgan import rgan
 #   - "rgan"
 #   - "rgan_dp"
 use_data = "amsterdam:combined_downsampled_subset"
-use_model = "rgan"
+use_model = "timegan"
+
+# Import after choosing model to allow for different environments:
+if use_model in ("rgan", "rgan_dp"):
+    from generative_models.rgan import rgan
+if use_model == "timegan":
+    from generative_models.timegan import timegan
 
 generated_data_dir = "./data/ts_generated/"
 
