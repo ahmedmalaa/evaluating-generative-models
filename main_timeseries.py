@@ -109,8 +109,8 @@ rgan_dp_experiment_settings = {
         "latent_dim": 10,
         "l2norm_bound": 1e-05,
         "learning_rate": 0.1,
-        "batch_size": 256,
-        "num_epochs": 1000,
+        "batch_size": 128,
+        "num_epochs": 500,
         "D_rounds": 3,
         "G_rounds": 1,
         # DP Settings:
