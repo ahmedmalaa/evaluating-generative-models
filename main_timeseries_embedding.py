@@ -795,6 +795,24 @@ def main():
                 # print(gen_data)
                 # print(seq_lens)
 
+                ############
+                # TEMP__exp_settings = experiment_settings["learn:amsterdam:combined_downsampled_subset"]
+                # TEMP__exp_settings["max_timesteps"] = 100 ####
+                # TEMP__exp_settings["data_path"] = "./data/amsterdam/combined_downsampled1000_longitudinal_data.csv"
+                # amsterdam_loader = amsterdam.AmsterdamLoader(
+                #     data_path=os.path.abspath(TEMP__exp_settings["data_path"]),
+                #     max_seq_len=TEMP__exp_settings["max_timesteps"],
+                #     seed=TEMP__exp_settings["data_split_seed"],
+                #     train_rate=TEMP__exp_settings["train_frac"],
+                #     val_rate=TEMP__exp_settings["val_frac"],
+                #     include_time=TEMP__exp_settings["include_time"],
+                #     debug_data=False,
+                #     pad_before=False,
+                #     padding_fill=TEMP__exp_settings["pad_val"],
+                # )
+                # _, seq_lens, _ = prepare_amsterdam(amsterdam_loader=amsterdam_loader, settings=TEMP__exp_settings)  # USE ORIG SEQ LENS
+                #############
+
                 dataset, dataloader = get_inference_dataloader(
                     x=generated_data, 
                     x_len=seq_lens, 
