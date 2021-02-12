@@ -41,7 +41,10 @@ from generative_models.adsgan import adsgan
 from generative_models.gan import gan
 from generative_models.pategan import pategan
 from generative_models.vae import vae
-from generative_models.dpgan import dpgan
+if not utils.check_tf2():
+    from generative_models.dpgan import dpgan
+else:
+    print("TF1 not found, cannot use model: dpgan")
 
 from metrics.combined import compute_metrics
 import metrics.prd_score as prd  # pylint: disable=unused-import
@@ -786,3 +789,5 @@ if __name__ == '__main__':
     
     elif run_experiment == "main_from_files":
         results = main_from_files(OC_params, OC_hyperparams)
+        print("results:\n", results)
+        pickle.dump(results, open(f'results/{dataset}{round(time.time())}.pkl','wb'))

@@ -276,14 +276,14 @@ def save_plot_sample(samples, idx, identifier, n_samples=6, num_epochs=None, nco
 #     return True
 
 
-def plot_trace(identifier, xmax=250, final=False, dp=False):
+def plot_trace(identifier, xmax=250, final=False, dp=False, dp_trace_enabled=True):
     """
     """
 
     trace_path = './generative_models/rgan/experiments/traces/' + identifier + '.trace.txt'
     da = read_table(trace_path, sep=' ')
     nrow = 3
-    if dp:
+    if dp and dp_trace_enabled:
         trace_dp_path = './generative_models/rgan/experiments/traces/' + identifier + '.dptrace.txt'
         da_dp = read_table(trace_dp_path, sep=' ')
         nrow += 1
@@ -349,7 +349,7 @@ def plot_trace(identifier, xmax=250, final=False, dp=False):
         for tick in ll_ticks:
             axarr[2].plot((-10, xmax+10), (tick, tick), ls='dotted', lw=0.5, color='black', alpha=0.4, zorder=0)
 
-    if dp:
+    if dp and dp_trace_enabled:
         assert da_dp.columns[0] == 'epoch'
         epochs = da_dp['epoch']
         eps_values = da_dp.columns[1:]

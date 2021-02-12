@@ -78,7 +78,7 @@ target_eps = [0.125, 0.25, 0.5, 1, 2, 4, 8]  # For privacy accountant.
 
 def rgan(ori_data, parameters):
 
-    out_data = None
+    out_data_best = None
     model.CUSTOM_EXPERIMENT = True  # Custom modifications enabled.
 
     # --- get settings --- #
@@ -426,7 +426,7 @@ def rgan(ori_data, parameters):
                 model.dump_parameters(settings["identifier"] + '_' + str(epoch), sess)
                 
                 if settings["custom_experiment"] is True:
-                    out_data = eval_sample[:eval_size_target, :, :].copy()
+                    out_data_best = eval_sample[:eval_size_target, :, :].copy()
         
             ## prob density (if available)
             if not pdf is None:
@@ -468,7 +468,8 @@ def rgan(ori_data, parameters):
             plotting.plot_trace(
                 identifier=settings["identifier"], 
                 xmax=settings["num_epochs"], 
-                dp=settings["dp"]
+                dp=settings["dp"],
+                dp_trace_enabled=dp_trace_enabled,
             )
 
         if settings["shuffle"]:     # shuffle the training data 
@@ -481,11 +482,18 @@ def rgan(ori_data, parameters):
             model.dump_parameters(identifier=settings["identifier"] + '_' + str(epoch), sess=sess)
 
     trace.flush()
-    plotting.plot_trace(identifier=settings["identifier"], xmax=settings["num_epochs"], dp=settings["dp"])
+    plotting.plot_trace(
+        identifier=settings["identifier"], 
+        xmax=settings["num_epochs"], 
+        dp=settings["dp"], 
+        dp_trace_enabled=dp_trace_enabled
+    )
     model.dump_parameters(identifier=settings["identifier"] + '_' + str(epoch), sess=sess)
 
-    if settings["custom_experiment"] is True and out_data is None:
-        out_data = eval_sample[:eval_size_target, :, :].copy()
+    if settings["custom_experiment"] is True:
+        out_data_last = eval_sample[:eval_size_target, :, :].copy()
+        if out_data_best is None:
+            out_data_best = out_data_last.copy()
     print("Final generated data shape:", eval_sample.shape)
 
-    return out_data
+    return out_data_best, out_data_last

@@ -31,7 +31,7 @@ from representations.ts_embedding import utils as s2s_utils
 #   - Apply existing embeddings:
 #     "apply:amsterdam:hns_competition_data"
 #     "apply:amsterdam:combined_downsampled_subset"
-run_experiment = "learn:amsterdam:combined_downsampled_subset"
+run_experiment = "apply:amsterdam:combined_downsampled_subset"
 
 models_dir = "./models/"
 embeddings_dir = "./data/ts_embedding/"
@@ -233,17 +233,21 @@ experiment_settings["apply:amsterdam:hns_competition_data"] = {
     "load_from_proc_cached": False,
 }
 
-_use_seq_len_apply_amsterdam_comb = 100
+_use_amsterdam_comb_version = "1000"
+_use_amsterdam_seq_len = 100
 experiment_settings["apply:amsterdam:combined_downsampled_subset"] = {
     "gen_data_path": "./data/ts_generated/",
-    "generated_data_name": "amsterdam_combined_downsampled_subset_<model_name>.npy",
+    "generated_data_name": \
+        f"amsterdam_embeddings_comb{_use_amsterdam_comb_version}_{_use_amsterdam_seq_len}_<model_name>.npy",
     "models_list": [
         "rgan",
+        "rgan_dp",
+        "timegan",
     ],
     # --------------------
     "include_time": False,
     "n_features": 70,
-    "max_timesteps": _use_seq_len_apply_amsterdam_comb,
+    "max_timesteps": _use_amsterdam_seq_len,
     "pad_val": -999.,
     "eos_val": +777., 
     # --------------------
@@ -251,9 +255,11 @@ experiment_settings["apply:amsterdam:combined_downsampled_subset"] = {
     "hidden_size": 70,
     "num_rnn_layers": 2,
     # --------------------
-    "model_path": f"./models/s2s_ae_amsterdam_comb_{_use_seq_len_apply_amsterdam_comb}.pt",
+    "model_path": \
+        f"./models/s2s_ae_amsterdam_comb{_use_amsterdam_comb_version}_{_use_amsterdam_seq_len}.pt",
     # --------------------
-    "embeddings_name": f"amsterdam_embeddings_comb_{_use_seq_len_apply_amsterdam_comb}_<model_name>.npy",
+    "embeddings_name": \
+        f"amsterdam_embeddings_comb{_use_amsterdam_comb_version}_{_use_amsterdam_seq_len}_<model_name>.npy",
     # --------------------
 }
 
@@ -788,6 +794,24 @@ def main():
                 seq_lens = np.ones((generated_data.shape[0],), dtype=int) * generated_data.shape[1]
                 # print(gen_data)
                 # print(seq_lens)
+
+                ############
+                # TEMP__exp_settings = experiment_settings["learn:amsterdam:combined_downsampled_subset"]
+                # TEMP__exp_settings["max_timesteps"] = 100 ####
+                # TEMP__exp_settings["data_path"] = "./data/amsterdam/combined_downsampled1000_longitudinal_data.csv"
+                # amsterdam_loader = amsterdam.AmsterdamLoader(
+                #     data_path=os.path.abspath(TEMP__exp_settings["data_path"]),
+                #     max_seq_len=TEMP__exp_settings["max_timesteps"],
+                #     seed=TEMP__exp_settings["data_split_seed"],
+                #     train_rate=TEMP__exp_settings["train_frac"],
+                #     val_rate=TEMP__exp_settings["val_frac"],
+                #     include_time=TEMP__exp_settings["include_time"],
+                #     debug_data=False,
+                #     pad_before=False,
+                #     padding_fill=TEMP__exp_settings["pad_val"],
+                # )
+                # _, seq_lens, _ = prepare_amsterdam(amsterdam_loader=amsterdam_loader, settings=TEMP__exp_settings)  # USE ORIG SEQ LENS
+                #############
 
                 dataset, dataloader = get_inference_dataloader(
                     x=generated_data, 

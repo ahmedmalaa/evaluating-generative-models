@@ -8,9 +8,9 @@ import copy
 import numpy as np
 
 from data import amsterdam
+from data import snp500
 from utils import prepare_amsterdam
-from generative_models.timegan import timegan
-from generative_models.rgan import rgan
+
 
 # ----------------------------------------------------------------------------------------------------------------------
 # Set experiment settings here:
@@ -24,7 +24,13 @@ from generative_models.rgan import rgan
 #   - "rgan"
 #   - "rgan_dp"
 use_data = "amsterdam:combined_downsampled_subset"
-use_model = "rgan"
+use_model = "timegan"
+
+# Import after choosing model to allow for different environments:
+if use_model in ("rgan", "rgan_dp"):
+    from generative_models.rgan import rgan
+if use_model == "timegan":
+    from generative_models.timegan import timegan
 
 generated_data_dir = "./data/ts_generated/"
 
@@ -35,14 +41,29 @@ amsterdam_data_settings = {
     "val_frac": 0.2,
     "n_features": 70,
     "include_time": False,
-    "max_timesteps": _use_amsterdam_seq_len
-    "pad_val": 0.,
+    "max_timesteps": _use_amsterdam_seq_len,
+    "pad_val": 0.5,
     "data_split_seed": 12345,
     "data_loading_force_refresh": True,
     # --------------------
     "data_path": f"data/amsterdam/combined_downsampled{_use_amsterdam_comb_version}_longitudinal_data.csv",
     "embeddings_name": \
         f"amsterdam_embeddings_comb{_use_amsterdam_comb_version}_{_use_amsterdam_seq_len}"
+}
+
+snp500_data_settings = {
+    "train_frac": 0.4,
+    "val_frac": 0.2,
+    "n_features": 5,
+    "include_time": False,
+    "max_timesteps": 1259,
+    "pad_val": 0.,
+    "data_split_seed": 12345,
+    "data_loading_force_refresh": False,
+    # --------------------
+    "data_path": "./data/snp500/all_stocks_5yr.csv",
+    "npz_cache_filepath": "./data/snp500/snp500.npz",
+    "embeddings_name": "snp500_embeddings"
 }
 
 timegan_experiment_settings = {
@@ -72,13 +93,15 @@ rgan_experiment_settings = {
         "dp": False,
         "dp_sigma": None,
     },
-    "generated_data_filename": "<embeddings_name>_rgan.npy"
+    "generated_data_filename_best": "<embeddings_name>_rgan_best.npy",
+    "generated_data_filename_last": "<embeddings_name>_rgan_last.npy",
 }
 
 rgan_dp_experiment_settings = copy.deepcopy(rgan_experiment_settings)
 rgan_dp_experiment_settings["model_params"]["dp"] = True
-rgan_dp_experiment_settings["model_params"]["dp_sigma"] = 0.1  # 1e-05
-rgan_dp_experiment_settings["generated_data_filename"] = "<embeddings_name>_rgan_dp.npy"
+rgan_dp_experiment_settings["model_params"]["dp_sigma"] = 0.0001  # 1e-05
+rgan_dp_experiment_settings["generated_data_filename_best"] = "<embeddings_name>_rgan_dp_best.npy"
+rgan_dp_experiment_settings["generated_data_filename_last"] = "<embeddings_name>_rgan_dp_last.npy"
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -103,11 +126,19 @@ def main():
             pad_before=False,
             padding_fill=active_data_settings["pad_val"],
         )
-        if use_model == "timegan":
-            # Timegan doesn't take variable-length sequences, use padding value of 0.
-            amsterdam_loader.padding_fill = 0.
         original_data, seq_lens, _ = prepare_amsterdam(amsterdam_loader=amsterdam_loader, settings=active_data_settings)
     
+    elif use_data == "snp500":
+        active_data_settings = snp500_data_settings
+        original_data, seq_lens, _ = snp500.load_snp_data(
+            data_path=snp500_data_settings["data_path"], 
+            npz_cache_filepath=snp500_data_settings["npz_cache_filepath"], 
+            padding_value=snp500_data_settings["pad_val"], 
+            normalize=True, 
+            include_time=snp500_data_settings["include_time"], 
+            force_refresh=snp500_data_settings["data_loading_force_refresh"], 
+        )
+
     else:
         raise ValueError(f"Unknown data source selected: '{use_data}'.")
 
@@ -125,24 +156,46 @@ def main():
         active_experiment_settings["model_params"]["seq_length"] = active_data_settings["max_timesteps"]
         active_experiment_settings["model_params"]["num_signals"] = active_data_settings["n_features"]
         active_experiment_settings["model_params"]["num_generated_features"] = active_data_settings["n_features"]
-        generated_data = rgan(ori_data=original_data, parameters=active_experiment_settings["model_params"])
+        generated_data_best, generated_data_last = rgan(ori_data=original_data, parameters=active_experiment_settings["model_params"])
         print(f"{'RGAN' if use_model == 'rgan' else 'RGAN-DP'} Generated Data:")
-        print("shape:", generated_data.shape)
-        print(generated_data)
-    
+        print("shape:", generated_data_best.shape)
+        print(generated_data_best)
+
+        generated_data_filepath_best = os.path.join(
+            generated_data_dir, 
+            active_experiment_settings["generated_data_filename_best"].replace(
+                "<embeddings_name>", 
+                active_data_settings["embeddings_name"]
+            )
+        )
+        generated_data_filepath_last = os.path.join(
+            generated_data_dir, 
+            active_experiment_settings["generated_data_filename_last"].replace(
+                "<embeddings_name>", 
+                active_data_settings["embeddings_name"]
+            )
+        )
+        np.save(generated_data_filepath_best, generated_data_best)
+        np.save(generated_data_filepath_last, generated_data_last)
+        print(f"Generative model: {use_model}, data: {use_data}\n" 
+            f"Generated and saved timeseries data of shape: {generated_data_best.shape}. File: {generated_data_filepath_best}.")
+        print(f"Generative model: {use_model}, data: {use_data}\n" 
+            f"Generated and saved timeseries data of shape: {generated_data_last.shape}. File: {generated_data_filepath_last}.")
+
     else:
         raise ValueError(f"Unknown model selected: '{use_model}'.")
     
-    generated_data_filepath = os.path.join(
-        generated_data_dir, 
-        active_experiment_settings["generated_data_filename"].replace(
-            "<embeddings_name>", 
-            active_data_settings["embeddings_name"]
+    if use_model not in ("rgan", "rgan_dp"):
+        generated_data_filepath = os.path.join(
+            generated_data_dir, 
+            active_experiment_settings["generated_data_filename"].replace(
+                "<embeddings_name>", 
+                active_data_settings["embeddings_name"]
+            )
         )
-    )
-    np.save(generated_data_filepath, generated_data)
-    print(f"Generative model: {use_model}, data: {use_data}\n" 
-        f"Generated and saved timeseries data of shape: {generated_data.shape}. File: {generated_data_filepath}.")
+        np.save(generated_data_filepath, generated_data)
+        print(f"Generative model: {use_model}, data: {use_data}\n" 
+            f"Generated and saved timeseries data of shape: {generated_data.shape}. File: {generated_data_filepath}.")
 
 
 if __name__ == "__main__":

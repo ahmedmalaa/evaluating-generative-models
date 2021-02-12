@@ -113,6 +113,7 @@ ENV/
 visualisations/
 jupyter/
 models/
+condaenvs/
 training_log.png
 
 # generative_models/rgan related:
@@ -132,6 +133,7 @@ generative_models/rgan/experiments/settings/*
 
 # Data dir content
 data/*
+data/ts/**
 !data/**/
 !data/__init__.py
 !data/**/*.md
