@@ -468,7 +468,8 @@ def rgan(ori_data, parameters):
             plotting.plot_trace(
                 identifier=settings["identifier"], 
                 xmax=settings["num_epochs"], 
-                dp=settings["dp"]
+                dp=settings["dp"],
+                dp_trace_enabled=dp_trace_enabled,
             )
 
         if settings["shuffle"]:     # shuffle the training data 
@@ -481,7 +482,12 @@ def rgan(ori_data, parameters):
             model.dump_parameters(identifier=settings["identifier"] + '_' + str(epoch), sess=sess)
 
     trace.flush()
-    plotting.plot_trace(identifier=settings["identifier"], xmax=settings["num_epochs"], dp=settings["dp"])
+    plotting.plot_trace(
+        identifier=settings["identifier"], 
+        xmax=settings["num_epochs"], 
+        dp=settings["dp"], 
+        dp_trace_enabled=dp_trace_enabled
+    )
     model.dump_parameters(identifier=settings["identifier"] + '_' + str(epoch), sess=sess)
 
     if settings["custom_experiment"] is True and out_data is None:
