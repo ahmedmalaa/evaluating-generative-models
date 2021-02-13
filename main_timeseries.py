@@ -25,7 +25,7 @@ from utils import prepare_amsterdam
 #   - "rgan"
 #   - "rgan-dp"
 use_data = "amsterdam:combds:1000:100"
-use_model = "rgan-dp"
+use_model = "timegan"
 
 # Import after choosing model to allow for different environments:
 if use_model in ("rgan", "rgan-dp"):
@@ -79,8 +79,8 @@ timegan_experiment_settings = {
         "module": "gru",
         "hidden_dim": 10,
         "num_layer": 3,
-        "iterations": 1000,
-        "batch_size": 128,
+        "iterations": 10_000,
+        "batch_size": 1024,
         "print_every_n_iters": 100,
     },
     "generated_data_filename": "<embeddings_name>_timegan.npy"
