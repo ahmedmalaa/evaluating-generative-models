@@ -494,6 +494,9 @@ def rgan(ori_data, parameters):
         out_data_last = eval_sample[:eval_size_target, :, :].copy()
         if out_data_best is None:
             out_data_best = out_data_last.copy()
+        # Reset tf:
+        sess.close()
+        tf.compat.v1.reset_default_graph()
     print("Final generated data shape:", eval_sample.shape)
 
     return out_data_best, out_data_last

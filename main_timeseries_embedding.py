@@ -258,8 +258,8 @@ experiment_settings["apply:amsterdam:combds"] = {
         f"amsterdam-combds-{_amsterdam_combds_N}-{_amsterdam_combds_T}_embeddings_<model_name>.npy",
     "models_list": [
         "rgan",
-        #"rgan_dp",
-        #"timegan",
+        "rgan-dp",
+        "timegan",
     ],
     # --------------------
     "include_time": False,
@@ -802,10 +802,10 @@ def main():
         elif "apply:amsterdam:combds" in run_experiment:
             
             for model_name in exp_settings["models_list"]:
-                if model_name in ("rgan", "rgan_dp"):
+                if model_name in ("rgan", "rgan-dp"):
                     exp_settings["models_list"].append(f"{model_name}_last")
                     exp_settings["models_list"].append(f"{model_name}_best")
-            exp_settings["models_list"] = [x for x in exp_settings["models_list"] if x not in ("rgan", "rgan_dp")]
+            exp_settings["models_list"] = [x for x in exp_settings["models_list"] if x not in ("rgan", "rgan-dp")]
 
             for model_name in exp_settings["models_list"]:
 

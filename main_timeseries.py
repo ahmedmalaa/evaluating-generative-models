@@ -22,12 +22,12 @@ from utils import prepare_amsterdam
 # use_model:
 #   - "timegan"
 #   - "rgan"
-#   - "rgan_dp"
+#   - "rgan-dp"
 use_data = "amsterdam:combds:1000:100"
-use_model = "rgan_dp"
+use_model = "rgan-dp"
 
 # Import after choosing model to allow for different environments:
-if use_model in ("rgan", "rgan_dp"):
+if use_model in ("rgan", "rgan-dp"):
     from generative_models.rgan import rgan
 if use_model == "timegan":
     from generative_models.timegan import timegan
@@ -115,10 +115,10 @@ rgan_dp_experiment_settings = {
         "G_rounds": 1,
         # DP Settings:
         "dp": True,
-        "dp_sigma": 0.001  # 1e-05
+        "dp_sigma": 1e-03  # Options: [1e-01, 1e-03, 1e-05]
     },
-    "generated_data_filename_best": "<embeddings_name>_rgan_dp_best.npy",
-    "generated_data_filename_last": "<embeddings_name>_rgan_dp_last.npy",
+    "generated_data_filename_best": "<embeddings_name>_rgan-dp-<sigma>_best.npy",
+    "generated_data_filename_last": "<embeddings_name>_rgan-dp-<sigma>_last.npy",
 }
 
 
@@ -149,7 +149,7 @@ def main():
     
     if use_model == "timegan":
         active_experiment_settings = timegan_experiment_settings
-    elif use_model in ("rgan", "rgan_dp"):
+    elif use_model in ("rgan", "rgan-dp"):
         active_experiment_settings = rgan_experiment_settings if use_model == "rgan" else  rgan_dp_experiment_settings
     else:
         raise ValueError(f"Unknown model selected: '{use_model}'.")
@@ -185,42 +185,67 @@ def main():
     if use_model == "timegan":
         generated_data = timegan(ori_data=original_data, parameters=active_experiment_settings["model_params"])
     
-    elif use_model in ("rgan", "rgan_dp"):
+    elif use_model in ("rgan", "rgan-dp"):
+        
         active_experiment_settings["model_params"]["data"] = use_data
         active_experiment_settings["model_params"]["identifier"] = use_model
+        
         active_experiment_settings["model_params"]["custom_experiment"] = True
         # ^ Keep "custom_experiment" True, needed for the rgan() script.
+        
         active_experiment_settings["model_params"]["num_samples"] = None  # Auto-set later.
         active_experiment_settings["model_params"]["seq_length"] = active_data_settings["max_timesteps"]
         active_experiment_settings["model_params"]["num_signals"] = active_data_settings["n_features"]
         active_experiment_settings["model_params"]["num_generated_features"] = active_data_settings["n_features"]
-        generated_data_best, generated_data_last = rgan(ori_data=original_data, parameters=active_experiment_settings["model_params"])
-        print(f"{'RGAN' if use_model == 'rgan' else 'RGAN-DP'} Generated Data:")
-        print("shape:", generated_data_best.shape)
-        print(generated_data_best)
+        
+        if isinstance(active_experiment_settings["model_params"]["dp_sigma"], (list, tuple)):
+            sigmas = active_experiment_settings["model_params"]["dp_sigma"]
+            assert use_model == "rgan-dp"
+        else:
+            sigmas = [active_experiment_settings["model_params"]["dp_sigma"]]
+        
+        for sigma in sigmas:
+            
+            active_experiment_settings["model_params"]["dp_sigma"] = sigma
+            if use_model == 'rgan':
+                print("Running RGAN...")
+            else:
+                print(f"Running RGAN-DP (sigma={sigma})...")
+            
+            generated_data_best, generated_data_last = rgan(
+                ori_data=original_data, 
+                parameters=active_experiment_settings["model_params"])
+            if use_model == 'rgan':
+                print("RGAN Generated Data:")
+            else:
+                print(f"RGAN-DP (sigma={sigma}) Generated Data:")
+            print("shape:", generated_data_best.shape)
+            print(generated_data_best)
 
-        generated_data_filepath_best = os.path.join(
-            generated_data_dir, 
-            active_experiment_settings["generated_data_filename_best"].replace(
-                "<embeddings_name>", 
-                active_data_settings["embeddings_name"]
+            generated_data_filepath_best = os.path.join(
+                generated_data_dir, 
+                active_experiment_settings["generated_data_filename_best"].replace(
+                    "<embeddings_name>", 
+                    active_data_settings["embeddings_name"]
+                ).replace("<sigma>", f"s{sigma:.0e}")
             )
-        )
-        generated_data_filepath_last = os.path.join(
-            generated_data_dir, 
-            active_experiment_settings["generated_data_filename_last"].replace(
-                "<embeddings_name>", 
-                active_data_settings["embeddings_name"]
+            generated_data_filepath_last = os.path.join(
+                generated_data_dir, 
+                active_experiment_settings["generated_data_filename_last"].replace(
+                    "<embeddings_name>", 
+                    active_data_settings["embeddings_name"]
+                ).replace("<sigma>", f"s{sigma:.0e}")
             )
-        )
-        np.save(generated_data_filepath_best, generated_data_best)
-        np.save(generated_data_filepath_last, generated_data_last)
-        print(f"Generative model: {use_model}, data: {use_data}\n" 
-            f"Generated and saved timeseries data of shape: {generated_data_best.shape}. File: {generated_data_filepath_best}.")
-        print(f"Generative model: {use_model}, data: {use_data}\n" 
-            f"Generated and saved timeseries data of shape: {generated_data_last.shape}. File: {generated_data_filepath_last}.")
+            np.save(generated_data_filepath_best, generated_data_best)
+            np.save(generated_data_filepath_last, generated_data_last)
+            print(f"Generative model: {use_model}, data: {use_data}\n" 
+                f"Generated and saved timeseries data of shape: {generated_data_best.shape}. "
+                f"File: {generated_data_filepath_best}.")
+            print(f"Generative model: {use_model}, data: {use_data}\n" 
+                f"Generated and saved timeseries data of shape: {generated_data_last.shape}. "
+                f"File: {generated_data_filepath_last}.")
     
-    if use_model not in ("rgan", "rgan_dp"):
+    if use_model not in ("rgan", "rgan-dp"):
         generated_data_filepath = os.path.join(
             generated_data_dir, 
             active_experiment_settings["generated_data_filename"].replace(
