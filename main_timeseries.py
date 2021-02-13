@@ -3,6 +3,7 @@
 Author: Evgeny Saveliev (e.s.saveliev@gmail.com)
 """
 import os
+import copy
 import pprint
 
 import numpy as np
@@ -34,9 +35,11 @@ if use_model == "timegan":
 
 generated_data_dir = "./data/ts_generated/"
 
+# NOTE: Automatically extracts N and T from experiment name:
 if "amsterdam:combds" in use_data:
     _amsterdam_combds_N = use_data.split(":")[-2]
     _amsterdam_combds_T = int(use_data.split(":")[-1])
+    use_data_full_name = copy.copy(use_data)
     use_data = "amsterdam:combds"
 else:
     _amsterdam_combds_N = "NOT_SET"
@@ -115,7 +118,7 @@ rgan_dp_experiment_settings = {
         "G_rounds": 1,
         # DP Settings:
         "dp": True,
-        "dp_sigma": 1e-03  # Options: [1e-01, 1e-03, 1e-05]
+        "dp_sigma": 1e-03  # Options: one or more (as list) from [1e-01, 1e-03, 1e-05]
     },
     "generated_data_filename_best": "<embeddings_name>_rgan-dp-<sigma>_best.npy",
     "generated_data_filename_last": "<embeddings_name>_rgan-dp-<sigma>_last.npy",
@@ -132,7 +135,8 @@ def print_exp_info(data_used, model_used, data_settings, exp_settings):
     pprint.pprint(data_settings, indent=4)
     print("\nModel settings:\n")
     pprint.pprint(exp_settings, indent=4)
-    print("\n", "=" * 80)
+    print()
+    print("=" * 80)
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -154,7 +158,7 @@ def main():
     else:
         raise ValueError(f"Unknown model selected: '{use_model}'.")
 
-    print_exp_info(use_data, use_model, active_data_settings, active_experiment_settings)
+    print_exp_info(use_data_full_name, use_model, active_data_settings, active_experiment_settings)
     
     # Prepare data:
     if use_data == "amsterdam:combds":

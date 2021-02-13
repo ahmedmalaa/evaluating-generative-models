@@ -3,6 +3,8 @@
 Author: Evgeny Saveliev (e.s.saveliev@gmail.com)
 """
 import os
+import copy
+import pprint
 
 import numpy as np
 
@@ -38,7 +40,7 @@ from representations.ts_embedding import utils as s2s_utils
 # NOTE: 
 # * to use amsterdam:combds requires first running ./data/amsterdam/data_scripts.py which generates 
 #   combined_downsampledN_longitudinal_data.csv.
-run_experiment = "learn:amsterdam:combds:1000"
+run_experiment = "apply:amsterdam:combds:1000:100"
 
 models_dir = "./models/"
 embeddings_dir = "./data/ts_embedding/"
@@ -122,11 +124,14 @@ experiment_settings["learn:snp500"] = {
 
 # Amsterdam Data Learn Autoencoder Experiments:
 # - "learn:amsterdam:combds"
+# NOTE: Automatically extracts N from experiment name:
 if "learn:amsterdam:combds" in run_experiment:
     _amsterdam_combds_N = run_experiment.split(":")[-1]
+    run_experiment_full_name = copy.copy(run_experiment)
     run_experiment = "learn:amsterdam:combds"
 else:
     _amsterdam_combds_N = "NOT_SET"
+    run_experiment_full_name = copy.copy(run_experiment)
 experiment_settings["learn:amsterdam:combds"] = {
     "train_frac": 0.4,
     "val_frac": 0.2,
@@ -245,13 +250,16 @@ experiment_settings["apply:amsterdam:hns"] = {
     "load_from_proc_cached": False,
 }
 
+# NOTE: Automatically extracts N and T from experiment name:
 if "apply:amsterdam:combds" in run_experiment:
     _amsterdam_combds_N = run_experiment.split(":")[-2]
     _amsterdam_combds_T = int(run_experiment.split(":")[-1])
+    run_experiment_full_name = copy.copy(run_experiment)
     run_experiment = "apply:amsterdam:combds"
 else:
     _amsterdam_combds_N = "NOT_SET"
     _amsterdam_combds_T = "NOT_SET"
+    run_experiment_full_name = copy.copy(run_experiment)
 experiment_settings["apply:amsterdam:combds"] = {
     "gen_data_path": "./data/ts_generated/",
     "generated_data_name": \
@@ -261,6 +269,7 @@ experiment_settings["apply:amsterdam:combds"] = {
         "rgan-dp",
         "timegan",
     ],
+    "rgan-dp-sigmas": [1e-1, 1e-3, 1e-5],
     # --------------------
     "include_time": False,
     "n_features": 70,
@@ -278,12 +287,32 @@ experiment_settings["apply:amsterdam:combds"] = {
     "embeddings_name": \
         f"amsterdam-combds-{_amsterdam_combds_N}-{_amsterdam_combds_T}_embeddings_<model_name>.npy",
     # --------------------
+    "apply_orig_seq_len": True,
+    "original_data_settings": {
+        "n_features": 70,
+        # --------------------
+        "include_time": False,
+        "max_timesteps": _amsterdam_combds_T,
+        "pad_val": -999.,
+        "data_split_seed": 12345,
+        "data_loading_force_refresh": True,
+        # --------------------
+        "data_path": f"./data/amsterdam/combined_downsampled{_amsterdam_combds_N}_longitudinal_data.csv",
+    }
 }
 
 # ----------------------------------------------------------------------------------------------------------------------
 # Utilities.
 
 # General utilities.
+def print_exp_info(exp_name, exp_settings):
+    print("=" * 80)
+    print(f"\nExperiment '{exp_name}':")
+    print("\nExperiment settings:\n")
+    pprint.pprint(exp_settings, indent=4)
+    print()
+    print("=" * 80)
+
 def make_all_dataloaders(data_dict, batch_size):
     dataloaders_dict = dict()
     for dataset_name, data_tensors in data_dict.items():
@@ -494,6 +523,7 @@ def prepare_hns_gen_data(hider_name, exp_settings):
 def main():
 
     exp_settings = experiment_settings[run_experiment]
+    print_exp_info(run_experiment_full_name, exp_settings)
     selected_device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Autoencoder learning experiments.
@@ -645,6 +675,9 @@ def main():
                 eos_val=exp_settings["eos_val"],
             )
             dataloaders_dict = make_all_dataloaders(data_dict, batch_size=exp_settings["batch_size"])
+
+        else:
+            raise ValueError(f"Unknown experiment selected: '{run_experiment}'.")
 
         encoder = Encoder(
             input_size=exp_settings["n_features"], 
@@ -801,12 +834,39 @@ def main():
         
         elif "apply:amsterdam:combds" in run_experiment:
             
+            # Parse the different rgan / rgan-dp "sub-model" names, add _last, _best:
             for model_name in exp_settings["models_list"]:
                 if model_name in ("rgan", "rgan-dp"):
-                    exp_settings["models_list"].append(f"{model_name}_last")
-                    exp_settings["models_list"].append(f"{model_name}_best")
+                    if (model_name == "rgan-dp" and
+                        exp_settings["rgan-dp-sigmas"] is not None and 
+                        isinstance(exp_settings["rgan-dp-sigmas"], (list, tuple)) and 
+                        len(exp_settings["rgan-dp-sigmas"]) > 0):
+                        for s in exp_settings["rgan-dp-sigmas"]:
+                            exp_settings["models_list"].append(f"{model_name}-s{s:.0e}_last")
+                            exp_settings["models_list"].append(f"{model_name}-s{s:.0e}_best")
+                    else:
+                        exp_settings["models_list"].append(f"{model_name}_last")
+                        exp_settings["models_list"].append(f"{model_name}_best")
             exp_settings["models_list"] = [x for x in exp_settings["models_list"] if x not in ("rgan", "rgan-dp")]
 
+            if exp_settings["apply_orig_seq_len"]:
+                orig_data_exp_settings = exp_settings["original_data_settings"]
+                amsterdam_loader = amsterdam.AmsterdamLoader(
+                    data_path=os.path.abspath(orig_data_exp_settings["data_path"]),
+                    max_seq_len=orig_data_exp_settings["max_timesteps"],
+                    seed=orig_data_exp_settings["data_split_seed"],
+                    train_rate=0.4,  # Arbitrary value, not used in this experiment.
+                    val_rate=0.2,    # Arbitrary value, not used in this experiment.
+                    include_time=orig_data_exp_settings["include_time"],
+                    debug_data=False,
+                    pad_before=False,
+                    padding_fill=orig_data_exp_settings["pad_val"],
+                )
+                _, seq_lens, _ = prepare_amsterdam(
+                    amsterdam_loader=amsterdam_loader, 
+                    settings=orig_data_exp_settings
+                )
+            
             for model_name in exp_settings["models_list"]:
 
                 filepath_gen_data = os.path.join(
@@ -814,30 +874,9 @@ def main():
                     exp_settings["generated_data_name"].replace("<model_name>", model_name),
                 )
                 generated_data = np.load(filepath_gen_data)
-                seq_lens = np.ones((generated_data.shape[0],), dtype=int) * generated_data.shape[1]
 
-                # TODO: Add exp/data settings preview at the beginning.
-                # TODO: Add exception for unknown exp/data
-                # TODO: Integrate this properly.
-                ###########
-                # print(gen_data)
-                # print(seq_lens)
-                # TEMP__exp_settings = experiment_settings["learn:amsterdam:combds"]
-                # TEMP__exp_settings["max_timesteps"] = 100 ####
-                # TEMP__exp_settings["data_path"] = "./data/amsterdam/combined_downsampled1000_longitudinal_data.csv"
-                # amsterdam_loader = amsterdam.AmsterdamLoader(
-                #     data_path=os.path.abspath(TEMP__exp_settings["data_path"]),
-                #     max_seq_len=TEMP__exp_settings["max_timesteps"],
-                #     seed=TEMP__exp_settings["data_split_seed"],
-                #     train_rate=TEMP__exp_settings["train_frac"],
-                #     val_rate=TEMP__exp_settings["val_frac"],
-                #     include_time=TEMP__exp_settings["include_time"],
-                #     debug_data=False,
-                #     pad_before=False,
-                #     padding_fill=TEMP__exp_settings["pad_val"],
-                # )
-                # _, seq_lens, _ = prepare_amsterdam(amsterdam_loader=amsterdam_loader, settings=TEMP__exp_settings)  # USE ORIG SEQ LENS
-                ############
+                if not exp_settings["apply_orig_seq_len"]:
+                    seq_lens = np.ones((generated_data.shape[0],), dtype=int) * generated_data.shape[1]
 
                 dataset, dataloader = get_inference_dataloader(
                     x=generated_data, 
@@ -874,6 +913,8 @@ def main():
                 print(f"Generated and saved embeddings of shape: {embeddings.shape}. File: {embeddings_filepath}.")
                 print("=" * 120)
 
+        else:
+            raise ValueError(f"Unknown experiment selected: '{run_experiment}'.")
 
 if __name__ == "__main__":
     main()
