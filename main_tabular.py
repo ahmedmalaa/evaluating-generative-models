@@ -560,14 +560,8 @@ def experiment_audit(OC_params, OC_hyperparams):
     results_after_auditing = compute_metrics(orig_data.to_numpy(), synth_data_a, 
                                         which_metric = which_metric, 
                                         wd_params = params, model=OC_model)
-    
-    
 
-    
-    
-    
-
-    return None
+    return results_after_auditing, synth_data_a
 
 
 def experiment_lambda_adsgan(OC_params, OC_hyperparams, lambdas=None):
