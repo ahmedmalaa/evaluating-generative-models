@@ -9,6 +9,7 @@ from sklearn.preprocessing import MinMaxScaler
 def load_snp_data(
     data_path, 
     npz_cache_filepath=None,
+    max_seq_len="MAX",
     padding_value=-999., 
     normalize=True, 
     include_time=False,
@@ -29,7 +30,11 @@ def load_snp_data(
 
         # Preprocess.
         seq_lens = np.zeros((len(stocks),), dtype=int)
-        processed_data = np.full((len(stocks), max(time_lengths), 6 if include_time else 5), padding_value)
+        if max_seq_len is not "MAX" and max_seq_len < max(time_lengths):
+            lim_len = max_seq_len
+        else:
+            lim_len = max(time_lengths)
+        processed_data = np.full((len(stocks), lim_len, 6 if include_time else 5), padding_value)
         stock_idx_to_name = dict()
 
         for idx, stock in enumerate(stocks):
@@ -57,8 +62,12 @@ def load_snp_data(
             if include_time:
                 array = np.concatenate([time, array], axis=1)
 
-            seq_lens[idx] = array.shape[0]
-            processed_data[idx, :array.shape[0], :] = array
+            if array.shape[0] < lim_len:
+                lim_len_ = array.shape[0]
+            else:
+                lim_len_ = lim_len
+            seq_lens[idx] = lim_len_
+            processed_data[idx, :lim_len_, :] = array[:lim_len_]
         
         # Save.
         if npz_cache_filepath is not None:

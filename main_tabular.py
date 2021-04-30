@@ -60,13 +60,13 @@ else:
 #%% Constants and settings
 
 # Options: ("main", "main_from_files", "lambda", "audit",)
-run_experiment = "main"
+run_experiment = "main_from_files"
 
 # Options: ("orig", "random", "adsgan", "wgan", "vae", "gan", "dpgan", "audit",)
 methods =['adsgan', 'wgan', 'vae', 'gan', 'dpgan']
 
 # Options: ("covid", "bc")
-dataset = 'covid'
+dataset = 'ts'
 
 original_data_dir = 'data/tabular/original'
 synth_data_dir = 'data/tabular/synth'
@@ -111,7 +111,7 @@ OC_params  = {
     "dropout_active": False,
     "LossFn": "SoftBoundary",
     "lr": 2e-3,
-    "epochs": 1000,
+    "epochs": 3000,
     "warm_up_epochs" : 20,
     "train_prop" : 1.0,
     "weight_decay": 2e-3

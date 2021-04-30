@@ -34,13 +34,16 @@ from representations.ts_embedding import utils as s2s_utils
 #     "apply:amsterdam:hns"
 #     "apply:amsterdam:combds:N:T"
 # NOTE: 
-# * combds = combined+downsampled; N = num. examples; T = seq. len.
-# * N = 1000 or 5000
-# * T = set below. (amsterdam_combds_T_list)
+# For learn:amsterdam:combds / apply:amsterdam:combds:
+#     * combds = combined+downsampled; N = num. examples; T = seq. len.
+#     * N = 1000 or 5000
+#     * T = set below. (amsterdam_combds_T_list)
+# For apply:snp500:
+#     * T = an integer or MAX
 # NOTE: 
 # * to use amsterdam:combds requires first running ./data/amsterdam/data_scripts.py which generates 
 #   combined_downsampledN_longitudinal_data.csv.
-run_experiment = "apply:amsterdam:combds:1000:100"
+run_experiment = "apply:amsterdam:combds:1000:100" # "learn:snp500"
 
 models_dir = "./models/"
 embeddings_dir = "./data/ts_embedding/"
@@ -48,6 +51,9 @@ experiment_settings = dict()
 
 amsterdam_combds_T_list = [10, 100, 1000]
 amsterdam_combds_T_train_epochs = [1000, 200, 50]
+
+snp500_T_list = [12, 125, "MAX"]
+snp500_T_train_epochs = [500, 100, 50]
 
 # Dummy Data Learn Autoencoder Experiment:
 experiment_settings["learn:dummy"] = {
@@ -103,22 +109,22 @@ experiment_settings["learn:snp500"] = {
     "n_features": 5,
     # --------------------
     "include_time": False,
-    "max_timesteps": 1259,
+    "max_timesteps": snp500_T_list,
     "pad_val": -999.,
     "eos_val": -777.,
     "data_split_seed": 12345,
-    "data_loading_force_refresh": True,
+    "data_loading_force_refresh": False,
     # --------------------
-    "n_epochs": 100,
+    "n_epochs": snp500_T_train_epochs,
     "batch_size": 256, 
     "hidden_size": 20,
     "num_rnn_layers": 2,
     "lr": 0.01,
     # --------------------
     "data_path": "./data/snp500/all_stocks_5yr.csv",
-    "npz_cache_filepath": "./data/snp500/snp500.npz",
-    "model_name": "s2s_ae_snp500.pt",
-    "embeddings_name": "snp500_embeddings.npy"
+    "npz_cache_filepath": "./data/snp500/snp500-<max_ts>.npz",
+    "model_name": "s2s_ae_snp500-<max_ts>.pt",
+    "embeddings_name": "snp500-<max_ts>_embeddings.npy"
 }
 
 
@@ -263,13 +269,15 @@ else:
 experiment_settings["apply:amsterdam:combds"] = {
     "gen_data_path": "./data/ts_generated/",
     "generated_data_name": \
-        f"amsterdam-combds-{_amsterdam_combds_N}-{_amsterdam_combds_T}_embeddings_<model_name>.npy",
+        f"amsterdam-combds-{_amsterdam_combds_N}-{_amsterdam_combds_T}_generated_<model_name>.npy",
     "models_list": [
         "rgan",
         "rgan-dp",
         "timegan",
+        "add-noise",
     ],
     "rgan-dp-sigmas": [1e-1, 1e-3, 1e-5],
+    "add-noise-sigmas": [1e-1, 1e-3, 1e-5],
     # --------------------
     "include_time": False,
     "n_features": 70,
@@ -525,6 +533,7 @@ def main():
     exp_settings = experiment_settings[run_experiment]
     print_exp_info(run_experiment_full_name, exp_settings)
     selected_device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    actual_max_seq_len = None
 
     # Autoencoder learning experiments.
     if "learn:" in run_experiment:
@@ -577,29 +586,36 @@ def main():
             dataloaders_dict = make_all_dataloaders(data_dict=data_dict, batch_size=exp_settings["batch_size"])
 
         elif run_experiment == "learn:snp500":
-            processed_data, seq_lens, _ = snp500.load_snp_data(
-                data_path=exp_settings["data_path"], 
-                npz_cache_filepath=exp_settings["npz_cache_filepath"], 
-                padding_value=exp_settings["pad_val"], 
-                normalize=True, 
-                include_time=exp_settings["include_time"], 
-                force_refresh=exp_settings["data_loading_force_refresh"], 
-            )
-            train_x_xlen, val_x_xlen, test_x_xlen = snp500.split_snp_data(
-                data=processed_data, 
-                seq_lens=seq_lens, 
-                frac_train=exp_settings["train_frac"], 
-                frac_val=exp_settings["val_frac"], 
-                seed=exp_settings["data_split_seed"]
-            )
-            x_xlen_dict = {"train": train_x_xlen, "val": val_x_xlen, "test": test_x_xlen}
-            data_dict = prep_datasets_for_s2s_ae_training(
-                x_xlen_dict=x_xlen_dict, 
-                device=selected_device, 
-                pad_val=exp_settings["pad_val"], 
-                eos_val=exp_settings["eos_val"]
-            )
-            dataloaders_dict = make_all_dataloaders(data_dict=data_dict, batch_size=exp_settings["batch_size"])
+            dataloaders_dict = []
+            for max_timesteps in exp_settings["max_timesteps"]:
+                processed_data, seq_lens, _ = snp500.load_snp_data(
+                    data_path=exp_settings["data_path"], 
+                    npz_cache_filepath=exp_settings["npz_cache_filepath"].replace("<max_ts>", str(max_timesteps)), 
+                    max_seq_len=max_timesteps,
+                    padding_value=exp_settings["pad_val"], 
+                    normalize=True, 
+                    include_time=exp_settings["include_time"], 
+                    force_refresh=exp_settings["data_loading_force_refresh"], 
+                )
+                if max_timesteps == "MAX":
+                    actual_max_seq_len = max(seq_lens)
+                train_x_xlen, val_x_xlen, test_x_xlen = snp500.split_snp_data(
+                    data=processed_data, 
+                    seq_lens=seq_lens, 
+                    frac_train=exp_settings["train_frac"], 
+                    frac_val=exp_settings["val_frac"], 
+                    seed=exp_settings["data_split_seed"]
+                )
+                x_xlen_dict = {"train": train_x_xlen, "val": val_x_xlen, "test": test_x_xlen}
+                data_dict = prep_datasets_for_s2s_ae_training(
+                    x_xlen_dict=x_xlen_dict, 
+                    device=selected_device, 
+                    pad_val=exp_settings["pad_val"], 
+                    eos_val=exp_settings["eos_val"]
+                )
+                dataloaders_dict.append(
+                    make_all_dataloaders(data_dict=data_dict, batch_size=exp_settings["batch_size"])
+                )
 
         elif run_experiment == "learn:amsterdam:test":
             amsterdam_loader = amsterdam.AmsterdamLoader(
@@ -649,7 +665,7 @@ def main():
                     pad_val=exp_settings["pad_val"],
                     eos_val=exp_settings["eos_val"],
                 )
-                dataloaders_dict.append( make_all_dataloaders(data_dict, batch_size=exp_settings["batch_size"]))
+                dataloaders_dict.append(make_all_dataloaders(data_dict, batch_size=exp_settings["batch_size"]))
         
         elif run_experiment == "learn:amsterdam:hns":
             # This loader matches the H&S competition data loading settings.
@@ -694,7 +710,7 @@ def main():
 
         opt = optim.Adam(s2s.parameters(), lr=exp_settings["lr"])
 
-        if "learn:amsterdam:combds" in run_experiment:
+        if run_experiment in ("learn:amsterdam:combds", "learn:snp500"):
             # Multiple training runs.
             
             n_epochs_list = exp_settings["n_epochs"]
@@ -714,6 +730,9 @@ def main():
             dataloaders_dict = [dataloaders_dict]
             model_name_list = [exp_settings["model_name"]]
             embeddings_name_list = [exp_settings["embeddings_name"]]
+
+        if actual_max_seq_len is not None:
+            max_timesteps_list = [x if x != "MAX" else actual_max_seq_len for x in max_timesteps_list]
         
         assert (
             len(n_epochs_list) == 
@@ -834,7 +853,7 @@ def main():
         
         elif "apply:amsterdam:combds" in run_experiment:
             
-            # Parse the different rgan / rgan-dp "sub-model" names, add _last, _best:
+            # Parse the different rgan / rgan-dp / add-noise "sub-model" names[, add _last, _best]:
             for model_name in exp_settings["models_list"]:
                 if model_name in ("rgan", "rgan-dp"):
                     if (model_name == "rgan-dp" and
@@ -847,7 +866,18 @@ def main():
                     else:
                         exp_settings["models_list"].append(f"{model_name}_last")
                         exp_settings["models_list"].append(f"{model_name}_best")
-            exp_settings["models_list"] = [x for x in exp_settings["models_list"] if x not in ("rgan", "rgan-dp")]
+                elif model_name == "add-noise":
+                    if (exp_settings["add-noise-sigmas"] is not None and 
+                        isinstance(exp_settings["add-noise-sigmas"], (list, tuple)) and 
+                        len(exp_settings["add-noise-sigmas"]) > 0):
+                        for s in exp_settings["add-noise-sigmas"]:
+                            exp_settings["models_list"].append(f"{model_name}-{s:.0e}")
+                    else:
+                        raise ValueError("`add-noise` sigmas not specified.")
+            exp_settings["models_list"] = [
+                x for x in exp_settings["models_list"] 
+                if x not in ("rgan", "rgan-dp", "add-noise")
+            ]
 
             if exp_settings["apply_orig_seq_len"]:
                 orig_data_exp_settings = exp_settings["original_data_settings"]

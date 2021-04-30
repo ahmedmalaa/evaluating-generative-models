@@ -16,26 +16,39 @@ from utils import prepare_amsterdam
 # ----------------------------------------------------------------------------------------------------------------------
 # Set experiment settings here:
 
+# Visible GPU(s):
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"  # "1" or "0,2" etc.
+
 # Options:
 # use_data:
-#   - "amsterdam:combds:N:T"  # NOTE: See main_timeseries_embedding.py for N and T.
-#   - "snp500"
+#   - "amsterdam:combds:N:T"
+#   - "snp500:T"
+# NOTE: 
+#   See main_timeseries_embedding.py for N and T.
 # use_model:
 #   - "timegan"
 #   - "rgan"
 #   - "rgan-dp"
-use_data = "amsterdam:combds:1000:100"
-use_model = "timegan"
+#   - "add-noise"
+use_data = "snp500:125"
+use_model = "rgan-dp"
+
+generated_data_dir = "./data/ts_generated/"
 
 # Import after choosing model to allow for different environments:
 if use_model in ("rgan", "rgan-dp"):
     from generative_models.rgan import rgan
 if use_model == "timegan":
     from generative_models.timegan import timegan
+if use_model == "add-noise":
+    from generative_models.add_noise import add_noise
 
-generated_data_dir = "./data/ts_generated/"
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Hyperparameters and other settings:
 
 # NOTE: Automatically extracts N and T from experiment name:
+use_data_full_name = use_data
 if "amsterdam:combds" in use_data:
     _amsterdam_combds_N = use_data.split(":")[-2]
     _amsterdam_combds_T = int(use_data.split(":")[-1])
@@ -44,84 +57,155 @@ if "amsterdam:combds" in use_data:
 else:
     _amsterdam_combds_N = "NOT_SET"
     _amsterdam_combds_T = "NOT_SET"
-amsterdam_data_settings = {
-    "train_frac": 0.4,
-    "val_frac": 0.2,
-    "n_features": 70,
-    "include_time": False,
-    "max_timesteps": _amsterdam_combds_T,
-    "pad_val": 0.5,
-    "data_split_seed": 12345,
-    "data_loading_force_refresh": True,
-    # --------------------
-    "data_path": f"data/amsterdam/combined_downsampled{_amsterdam_combds_N}_longitudinal_data.csv",
-    "embeddings_name": \
-        f"amsterdam-combds-{_amsterdam_combds_N}-{_amsterdam_combds_T}_embeddings"
-}
-
-snp500_data_settings = {
-    "train_frac": 0.4,
-    "val_frac": 0.2,
-    "n_features": 5,
-    "include_time": False,
-    "max_timesteps": 1259,
-    "pad_val": 0.,
-    "data_split_seed": 12345,
-    "data_loading_force_refresh": False,
-    # --------------------
-    "data_path": "./data/snp500/all_stocks_5yr.csv",
-    "npz_cache_filepath": "./data/snp500/snp500.npz",
-    "embeddings_name": "snp500_embeddings"
-}
-
-timegan_experiment_settings = {
-    "model_params": {
-        "module": "gru",
-        "hidden_dim": 10,
-        "num_layer": 3,
-        "iterations": 10_000,
-        "batch_size": 1024,
-        "print_every_n_iters": 100,
+amsterdam_experiment_settings = {
+    "data": {
+        "train_frac": 0.4,
+        "val_frac": 0.2,
+        "n_features": 70,
+        "include_time": False,
+        "max_timesteps": _amsterdam_combds_T,
+        "pad_val": 0.5,
+        "data_split_seed": 12345,
+        "data_loading_force_refresh": True,
+        # --------------------
+        "data_path": f"data/amsterdam/combined_downsampled{_amsterdam_combds_N}_longitudinal_data.csv",
+        "original_copy_filename": f"amsterdam-combds-{_amsterdam_combds_N}-{_amsterdam_combds_T}_ORIGINAL.npy",
+        "generated_name": \
+            f"amsterdam-combds-{_amsterdam_combds_N}-{_amsterdam_combds_T}_generated"
     },
-    "generated_data_filename": "<embeddings_name>_timegan.npy"
+    "models": {
+        "timegan": {
+            "model_params": {
+                "module": "gru",
+                "hidden_dim": 10,
+                "num_layer": 3,
+                "iterations": 2_000,
+                "batch_size": 1024,
+                "print_every_n_iters": 100,
+            },
+            "generated_data_filename": "<generated_name>_timegan.npy"
+        },
+        "rgan": {
+            "model_params": {
+                "hidden_units_g": 100,
+                "hidden_units_d": 100,
+                "latent_dim": 10,
+                "l2norm_bound": 1e-05,
+                "learning_rate": 0.1,
+                "batch_size": 256,
+                "num_epochs": 1_000,
+                "D_rounds": 1,
+                "G_rounds": 3,
+                # DP Settings:
+                "dp": False,
+                "dp_sigma": None,
+            },
+            "generated_data_filename_best": "<generated_name>_rgan_best.npy",
+            "generated_data_filename_last": "<generated_name>_rgan_last.npy",
+        },
+        "rgan-dp": {
+                "model_params": {
+                "hidden_units_g": 100,
+                "hidden_units_d": 100,
+                "latent_dim": 10,
+                "l2norm_bound": 1e-05,
+                "learning_rate": 0.1,
+                "batch_size": 128,
+                "num_epochs": 500,
+                "D_rounds": 3,
+                "G_rounds": 1,
+                # DP Settings:
+                "dp": True,
+                "dp_sigma": [1e-01, 1e-03, 1e-05]  # Options: one or more (as list) from [1e-01, 1e-03, 1e-05]
+            },
+            "generated_data_filename_best": "<generated_name>_rgan-dp-<sigma>_best.npy",
+            "generated_data_filename_last": "<generated_name>_rgan-dp-<sigma>_last.npy",
+        },
+        "add-noise": {
+            "model_params": {
+                "sigma": [0.1, 0.001, 0.00001]
+            },
+            "generated_data_filename": "<generated_name>_add-noise-<sigma>.npy",
+        }
+    }
 }
 
-rgan_experiment_settings = {
-    "model_params": {
-        "hidden_units_g": 100,
-        "hidden_units_d": 100,
-        "latent_dim": 10,
-        "l2norm_bound": 1e-05,
-        "learning_rate": 0.1,
-        "batch_size": 256,
-        "num_epochs": 1000,
-        "D_rounds": 1,
-        "G_rounds": 3,
-        # DP Settings:
-        "dp": False,
-        "dp_sigma": None,
+if "snp500" in use_data:
+    _snp500_T = int(use_data.split(":")[-1])
+    use_data = "snp500"
+else:
+    _snp500_T = "NOT_SET"
+snp500_experiment_settings = {
+    "data": {
+        "train_frac": 0.4,
+        "val_frac": 0.2,
+        "n_features": 5,
+        "include_time": False,
+        "max_timesteps": 1259,
+        "pad_val": 0.,
+        "data_split_seed": 12345,
+        "data_loading_force_refresh": True,
+        # --------------------
+        "data_path": "./data/snp500/all_stocks_5yr.csv",
+        "npz_cache_filepath": f"./data/snp500/snp500-{_snp500_T}.npz",
+        "original_copy_filename": f"snp500-{_snp500_T}_ORIGINAL.npy",
+        "generated_name": f"snp500-{_snp500_T}_generated"
     },
-    "generated_data_filename_best": "<embeddings_name>_rgan_best.npy",
-    "generated_data_filename_last": "<embeddings_name>_rgan_last.npy",
-}
-
-rgan_dp_experiment_settings = {
-    "model_params": {
-        "hidden_units_g": 100,
-        "hidden_units_d": 100,
-        "latent_dim": 10,
-        "l2norm_bound": 1e-05,
-        "learning_rate": 0.1,
-        "batch_size": 128,
-        "num_epochs": 500,
-        "D_rounds": 3,
-        "G_rounds": 1,
-        # DP Settings:
-        "dp": True,
-        "dp_sigma": 1e-03  # Options: one or more (as list) from [1e-01, 1e-03, 1e-05]
-    },
-    "generated_data_filename_best": "<embeddings_name>_rgan-dp-<sigma>_best.npy",
-    "generated_data_filename_last": "<embeddings_name>_rgan-dp-<sigma>_last.npy",
+    "models": {
+        "timegan": {
+            "model_params": {
+                "module": "gru",
+                "hidden_dim": 10,
+                "num_layer": 3,
+                "iterations": 2_000,
+                "batch_size": 1024,
+                "print_every_n_iters": 100,
+            },
+            "generated_data_filename": "<generated_name>_timegan.npy"
+        },
+        "rgan": {
+            "model_params": {
+                "hidden_units_g": 100,
+                "hidden_units_d": 100,
+                "latent_dim": 10,
+                "l2norm_bound": 1e-05,
+                "learning_rate": 0.1,
+                "batch_size": 64,
+                "num_epochs": 500,
+                "D_rounds": 1,
+                "G_rounds": 6,
+                # DP Settings:
+                "dp": False,
+                "dp_sigma": None,
+            },
+            "generated_data_filename_best": "<generated_name>_rgan_best.npy",
+            "generated_data_filename_last": "<generated_name>_rgan_last.npy",
+        },
+        "rgan-dp": {
+                "model_params": {
+                "hidden_units_g": 100,
+                "hidden_units_d": 100,
+                "latent_dim": 10,
+                "l2norm_bound": 1e-05,
+                "learning_rate": 0.1,
+                "batch_size": 16,
+                "num_epochs": 100,
+                "D_rounds": 4,
+                "G_rounds": 1,
+                # DP Settings:
+                "dp": True,
+                "dp_sigma": [1e-01, 1e-05]  # Options: one or more (as list) from [1e-01, 1e-03, 1e-05]
+            },
+            "generated_data_filename_best": "<generated_name>_rgan-dp-<sigma>_best.npy",
+            "generated_data_filename_last": "<generated_name>_rgan-dp-<sigma>_last.npy",
+        },
+        "add-noise": {
+            "model_params": {
+                "sigma": [0.1, 0.001, 0.00001]
+            },
+            "generated_data_filename": "<generated_name>_add-noise-<sigma>.npy",
+        }
+    }
 }
 
 
@@ -145,20 +229,26 @@ def main():
 
     # Collect settings:
     if use_data == "amsterdam:combds":
-        active_data_settings = amsterdam_data_settings
+        active_experiment_settings = amsterdam_experiment_settings
+        active_data_settings = amsterdam_experiment_settings["data"]
     elif use_data == "snp500":
-        active_data_settings = snp500_data_settings
+        active_experiment_settings = snp500_experiment_settings
+        active_data_settings = snp500_experiment_settings["data"]
     else:
         raise ValueError(f"Unknown data source selected: '{use_data}'.")
     
     if use_model == "timegan":
-        active_experiment_settings = timegan_experiment_settings
-    elif use_model in ("rgan", "rgan-dp"):
-        active_experiment_settings = rgan_experiment_settings if use_model == "rgan" else  rgan_dp_experiment_settings
+        active_model_settings = active_experiment_settings["models"]["timegan"]
+    elif use_model == "rgan":
+        active_model_settings = active_experiment_settings["models"]["rgan"]
+    elif use_model == "rgan-dp":
+        active_model_settings = active_experiment_settings["models"]["rgan-dp"]
+    elif use_model == "add-noise":
+        active_model_settings = active_experiment_settings["models"]["add-noise"]
     else:
         raise ValueError(f"Unknown model selected: '{use_model}'.")
 
-    print_exp_info(use_data_full_name, use_model, active_data_settings, active_experiment_settings)
+    print_exp_info(use_data_full_name, use_model, active_data_settings, active_model_settings)
     
     # Prepare data:
     if use_data == "amsterdam:combds":
@@ -177,40 +267,57 @@ def main():
     
     elif use_data == "snp500":
         original_data, seq_lens, _ = snp500.load_snp_data(
-            data_path=snp500_data_settings["data_path"], 
-            npz_cache_filepath=snp500_data_settings["npz_cache_filepath"], 
-            padding_value=snp500_data_settings["pad_val"], 
+            data_path=active_data_settings["data_path"], 
+            npz_cache_filepath=active_data_settings["npz_cache_filepath"], 
+            padding_value=active_data_settings["pad_val"], 
             normalize=True, 
-            include_time=snp500_data_settings["include_time"], 
-            force_refresh=snp500_data_settings["data_loading_force_refresh"], 
+            include_time=active_data_settings["include_time"], 
+            force_refresh=active_data_settings["data_loading_force_refresh"], 
         )
+    
+    original_copy_path = os.path.join(generated_data_dir, active_data_settings["original_copy_filename"])
+    if not os.path.exists(original_copy_path):
+        np.save(original_copy_path, original_data)
+        print(f"Original data copy saved for: {use_data_full_name}\n" 
+            f"Data shape: {original_data.shape}. File: {original_copy_path}.")
 
     # Run model:
     if use_model == "timegan":
-        generated_data = timegan(ori_data=original_data, parameters=active_experiment_settings["model_params"])
+        generated_data = timegan(ori_data=original_data, parameters=active_model_settings["model_params"])
+
+        generated_data_filepath = os.path.join(
+            generated_data_dir, 
+            active_model_settings["generated_data_filename"].replace(
+                "<generated_name>", 
+                active_data_settings["generated_name"]
+            )
+        )
+        np.save(generated_data_filepath, generated_data)
+        print(f"Generative model: {use_model}, data: {use_data}\n" 
+            f"Generated and saved timeseries data of shape: {generated_data.shape}. File: {generated_data_filepath}.")
     
     elif use_model in ("rgan", "rgan-dp"):
         
-        active_experiment_settings["model_params"]["data"] = use_data
-        active_experiment_settings["model_params"]["identifier"] = use_model
+        active_model_settings["model_params"]["data"] = use_data
+        active_model_settings["model_params"]["identifier"] = use_model
         
-        active_experiment_settings["model_params"]["custom_experiment"] = True
+        active_model_settings["model_params"]["custom_experiment"] = True
         # ^ Keep "custom_experiment" True, needed for the rgan() script.
         
-        active_experiment_settings["model_params"]["num_samples"] = None  # Auto-set later.
-        active_experiment_settings["model_params"]["seq_length"] = active_data_settings["max_timesteps"]
-        active_experiment_settings["model_params"]["num_signals"] = active_data_settings["n_features"]
-        active_experiment_settings["model_params"]["num_generated_features"] = active_data_settings["n_features"]
+        active_model_settings["model_params"]["num_samples"] = None  # Auto-set later.
+        active_model_settings["model_params"]["seq_length"] = active_data_settings["max_timesteps"]
+        active_model_settings["model_params"]["num_signals"] = active_data_settings["n_features"]
+        active_model_settings["model_params"]["num_generated_features"] = active_data_settings["n_features"]
         
-        if isinstance(active_experiment_settings["model_params"]["dp_sigma"], (list, tuple)):
-            sigmas = active_experiment_settings["model_params"]["dp_sigma"]
+        if isinstance(active_model_settings["model_params"]["dp_sigma"], (list, tuple)):
+            sigmas = active_model_settings["model_params"]["dp_sigma"]
             assert use_model == "rgan-dp"
         else:
-            sigmas = [active_experiment_settings["model_params"]["dp_sigma"]]
+            sigmas = [active_model_settings["model_params"]["dp_sigma"]]
         
         for sigma in sigmas:
             
-            active_experiment_settings["model_params"]["dp_sigma"] = sigma
+            active_model_settings["model_params"]["dp_sigma"] = sigma
             if use_model == 'rgan':
                 print("Running RGAN...")
             else:
@@ -218,7 +325,7 @@ def main():
             
             generated_data_best, generated_data_last = rgan(
                 ori_data=original_data, 
-                parameters=active_experiment_settings["model_params"])
+                parameters=active_model_settings["model_params"])
             if use_model == 'rgan':
                 print("RGAN Generated Data:")
             else:
@@ -228,18 +335,21 @@ def main():
 
             generated_data_filepath_best = os.path.join(
                 generated_data_dir, 
-                active_experiment_settings["generated_data_filename_best"].replace(
-                    "<embeddings_name>", 
-                    active_data_settings["embeddings_name"]
-                ).replace("<sigma>", f"s{sigma:.0e}")
+                active_model_settings["generated_data_filename_best"].replace(
+                    "<generated_name>", 
+                    active_data_settings["generated_name"]
+                )
             )
             generated_data_filepath_last = os.path.join(
                 generated_data_dir, 
-                active_experiment_settings["generated_data_filename_last"].replace(
-                    "<embeddings_name>", 
-                    active_data_settings["embeddings_name"]
-                ).replace("<sigma>", f"s{sigma:.0e}")
+                active_model_settings["generated_data_filename_last"].replace(
+                    "<generated_name>", 
+                    active_data_settings["generated_name"]
+                )
             )
+            if use_model == 'rgan-dp':
+                generated_data_filepath_best = generated_data_filepath_best.replace("<sigma>", f"s{sigma:.0e}")
+                generated_data_filepath_last = generated_data_filepath_last.replace("<sigma>", f"s{sigma:.0e}")
             np.save(generated_data_filepath_best, generated_data_best)
             np.save(generated_data_filepath_last, generated_data_last)
             print(f"Generative model: {use_model}, data: {use_data}\n" 
@@ -249,17 +359,32 @@ def main():
                 f"Generated and saved timeseries data of shape: {generated_data_last.shape}. "
                 f"File: {generated_data_filepath_last}.")
     
-    if use_model not in ("rgan", "rgan-dp"):
-        generated_data_filepath = os.path.join(
-            generated_data_dir, 
-            active_experiment_settings["generated_data_filename"].replace(
-                "<embeddings_name>", 
-                active_data_settings["embeddings_name"]
+    elif use_model == "add-noise":
+        
+        if isinstance(active_model_settings["model_params"]["sigma"], (list, tuple)):
+            sigmas = active_model_settings["model_params"]["sigma"]
+        else:
+            sigmas = [active_model_settings["model_params"]["sigma"]]
+        
+        for sigma in sigmas:
+            generated_data = add_noise(ori_data=original_data, noise_size=sigma)
+
+            generated_data_filepath = os.path.join(
+                generated_data_dir, 
+                active_model_settings["generated_data_filename"].replace(
+                    "<generated_name>", 
+                    active_data_settings["generated_name"]
+                ).replace("<sigma>", f"{sigma:.0e}")
             )
-        )
-        np.save(generated_data_filepath, generated_data)
-        print(f"Generative model: {use_model}, data: {use_data}\n" 
-            f"Generated and saved timeseries data of shape: {generated_data.shape}. File: {generated_data_filepath}.")
+
+            np.save(generated_data_filepath, generated_data)
+            print(f"Generative model: {use_model}, data: {use_data}\n" 
+                f"Generated and saved timeseries data of shape: {generated_data.shape}. "
+                f"File: {generated_data_filepath}.")
+    
+    # Unset visible GPU env. variable.
+    if "CUDA_VISIBLE_DEVICES" in os.environ: 
+        del os.environ["CUDA_VISIBLE_DEVICES"]
 
 
 if __name__ == "__main__":
