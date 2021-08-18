@@ -116,6 +116,8 @@ models/
 
 # Data dir content
 data/*
+
+representations/*
 !data/**/
 !data/__init__.py
 !data/**/*.md
@@ -123,6 +125,8 @@ data/amsterdam/*
 !data/amsterdam/*.py
 data/googlestock/*
 !data/googlestock/*.py
+data/cifar10/*
+!data/cifar10/*.py
 data/snp500/*
 !data/snp500/*.py
 data/ts_embedding/*
