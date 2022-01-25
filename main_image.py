@@ -6,17 +6,19 @@ Created on Wed Jan 13 10:46:17 2021
 """
 
 
+import tensorflow as tf
+#tf.compat.v1.enable_eager_execution()
+
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 
 import glob
-
-import tensorflow as tf
 from tensorflow.keras.preprocessing.image import load_img
 from tensorflow.keras.preprocessing.image import img_to_array
 from tensorflow.keras.applications.vgg16 import preprocess_input
 from tensorflow.keras.models import Model
 
+        
 import numpy as np
 import torch
 import pickle
@@ -52,8 +54,8 @@ OC_params  = dict({"rep_dim": 32,
 
 OC_hyperparams = dict({"Radius": 1, "nu": 1e-2})
 
-which_metric = [[],['OCalt']]
-#which_metric = None
+which_metric = [[],['OC']]
+which_metric = None
 
 
 
@@ -259,9 +261,9 @@ def activation_loader_per_class(path_set, embedding = None, verbose = False):
     activations = []
     # Load embedder function
     if embedding is not None:
-        #tf.compat.v1.enable_eager_execution()
-        
-        embedder = None#load_embedder(embedding)
+        tf.compat.v1.enable_eager_execution()
+
+        embedder = load_embedder(embedding)
 
     # Check if folder exists
     for label in range(10):
@@ -497,7 +499,9 @@ def main(paths, embedding, OC_params, OC_hyperparams, load_act=True, save_act=Tr
     results = []
     # Load embedder function
     if embedding is not None:
+#        tf.compat.v1.enable_eager_execution()
         embedder = load_embedder(embedding)
+        embedder.run_eagerly = True
         print('Checking of embedder is using GPU')
         sess = tf.compat.v1.Session(config=tf.compat.v1.ConfigProto(log_device_placement=True))
         print(sess)
@@ -519,7 +523,7 @@ def main(paths, embedding, OC_params, OC_hyperparams, load_act=True, save_act=Tr
             OC_model.eval()
             
         else:
-            results.append([compute_metrics(activations[0], act, model=OC_model), path])
+            results.append([compute_metrics(activations[0], act, which_metric=which_metric, model=OC_model), path])
     
     
     return results
@@ -531,17 +535,19 @@ if __name__ == '__main__':
     os.environ['CUDA_VISIBLE_DEVICES'] = '0'
     print('================',tf.executing_eagerly())
     #for embed in ['inceptionv3','vgg','identity']:
-    methods = ['WGAN-GP','DCGAN','VAE', 'ADS-GAN']
+    methods = ['WGAN-GP'] #,'DCGAN','VAE', 'ADS-GAN'
     load_act = True
-    save_act = False
+    save_act = True
     nul_path = ['data/mnist/original/testing']
-    conditional_path = ['data/mnist/synth_test/CGAN']
+    conditional_path = ['data/mnist/synth/CGAN']
     random_path = ['data/mnist/random']
-    other_paths = [f'data/mnist/synth_test/{method}' for method in methods]
-    paths = nul_path + random_path + other_paths
+    other_paths = [f'data/mnist/synth/{method}' for method in methods]
+    #paths = nul_path + random_path + other_paths
+    paths = nul_path + other_paths
+    paths = ['data/cifar10/original/testing', 'data/cifar10/stylegan','data/cifar10/ddpm']
     
-    dataset = 'MNIST'
-    train_OC = True
+    dataset = 'cifar10'
+    train_OC = False
     save_OC= True
     
     #embeddings.append(None)
@@ -560,11 +566,9 @@ if __name__ == '__main__':
     exp_no = 1
     embedding_no = 0
     embedding = embeddings[embedding_no]
-    results = experiments(nul_path+conditional_path, embedding, OC_params, OC_hyperparams, exp_no)
-    pickle.dump(results,open(f'results/mnist_experiments_{exp_no}_{round(time.time())}.pkl','wb'))
-    #output = main(paths, embedding, OC_params, OC_hyperparams, load_act, save_act,verbose=True, just_load = False)
+    #results = experiments(paths, embedding, OC_params, OC_hyperparams, exp_no)
+    #pickle.dump(results,open(f'results/mnist_experiments_{exp_no}_{round(time.time())}.pkl','wb'))
+    output = main(paths, embedding, OC_params, OC_hyperparams, load_act, save_act,verbose=True, just_load = False)
+    pickle.dump(output,open(f'results/{dataset}_baselines{round(time.time())}.pkl','wb'))
     #results_res = experiments_resolution(nul_path+conditional_path, embedding, OC_params, OC_hyperparams)
-    #pickle.dump(output,open(f'results/mnist_baselines{round(time.time())}.pkl','wb'))
-    
     #pickle.dump(output,open(f'results/mnist_resolution{round(time.time())}.pkl','wb'))
-    
